@@ -249,7 +249,7 @@ function updateEnabled() {
   const canRun = idle && j && !jobActive && S.lines.length;
   $('#btn-run').disabled = !canRun;
   $('#btn-resume-run').disabled = !canRun;
-  const machineHeld = state === 'Hold';
+  const machineHeld = state === 'Hold' || state === 'Door'; // M0 ou porte de sécurité
   const pauseBtn = $('#btn-pause');
   pauseBtn.disabled = !(j && (j.state === 'running' || j.state === 'paused'));
   pauseBtn.textContent = j?.state === 'spinup' ? 'Redémarrage…'
@@ -551,11 +551,11 @@ $('#btn-run').onclick = () => {
 };
 $('#opt-pause-spindle').checked = store.get('pauseSpindle', false);
 $('#opt-pause-spindle').onchange = (e) => store.set('pauseSpindle', e.target.checked);
-const spinUpSeconds = () => Math.max(0, Number($('#resume-spinup').value) || 3);
+const spinUpSeconds = () => { const v = Number($('#resume-spinup').value); return Number.isFinite(v) && v >= 0 ? v : 3; };
 $('#btn-pause').onclick = () => {
   const j = S.job;
   // Reprise après une pause ou un M0 : le serveur rallume la broche si besoin.
-  if (j?.state === 'paused' || (j?.state === 'running' && S.machine.status.state === 'Hold')) {
+  if (j?.state === 'paused' || (j?.state === 'running' && ['Hold', 'Door'].includes(S.machine.status.state))) {
     act('resume', { spinUp: spinUpSeconds() }).catch(() => {});
   } else {
     act('pause', { stopSpindle: $('#opt-pause-spindle').checked }).catch(() => {});
@@ -572,7 +572,14 @@ $('#btn-tool-probe').onclick = () => runProbe('z', probeValues('z')).catch(() =>
 function setupResume() {
   const n = Math.max(1, S.lines.length);
   for (const el of [$('#resume-line'), $('#resume-slider')]) { el.max = n; }
-  const suggested = S.job && ['stopped', 'paused'].includes(S.job.state) ? Math.max(1, S.job.acked - 1) : 1;
+  // Après un arrêt, « acquittée » ne veut pas dire « usinée » : la carte accepte
+  // les lignes bien avant de les exécuter. On repart de la ligne du parcours la
+  // plus proche de la position réelle de l'outil.
+  let suggested = 1;
+  if (S.job && ['stopped', 'paused'].includes(S.job.state)) {
+    const near = viewer.nearestLine(S.machine.status.wpos, Math.max(0, S.job.acked - 200), S.job.acked);
+    suggested = near !== null ? near + 1 : Math.max(1, S.job.acked - 1);
+  }
   setResumeLine(suggested);
 }
 
@@ -588,7 +595,7 @@ function setResumeLine(n) {
     ctx.push(k === i ? `<span class="cur">${t}</span>` : t);
   }
   $('#resume-context').innerHTML = ctx.join('\n') || 'Aucun programme chargé';
-  const pre = S.lines.length && i > 0 ? buildResume(S.lines, i, { spinUpSeconds: Number($('#resume-spinup').value) }).lines : [];
+  const pre = S.lines.length && i > 0 ? buildResume(S.lines, i, { spinUpSeconds: spinUpSeconds(), minSafeZ: safeZ() }).lines : [];
   $('#resume-preamble').textContent = pre.length ? `Préambule envoyé avant la ligne ${n} :\n${pre.join('\n')}` : 'Départ au début : pas de préambule.';
   if (activeTab === 'resume') viewer.setMarker(i);
 }
@@ -641,7 +648,7 @@ $('#goto-go').onclick = () => {
 $('#btn-resume-run').onclick = () => {
   const n = Number($('#resume-line').value);
   if (!confirm(`Reprendre à la ligne ${n} ?\n${S.lines[n - 1]}\n\nL'outil va monter au Z de sécurité puis se placer au-dessus du point de reprise.`)) return;
-  act('run', { from: n - 1, spinUp: Number($('#resume-spinup').value) }).catch(() => {});
+  act('run', { from: n - 1, spinUp: spinUpSeconds(), safeZ: safeZ() }).catch(() => {});
 };
 
 // ---- Onglets ---------------------------------------------------------------
@@ -820,6 +827,8 @@ $('#probe-manual').addEventListener('click', async (e) => {
     return;
   }
   if ('mcontact' in b.dataset) {
+    // Le zéro se pose sur la position actuelle : elle doit être définitive.
+    if (S.machine.status.state !== 'Idle') return toast('Attendez l\'arrêt complet de la machine avant le contact', 'err');
     const value = manualContactValue();
     await act('cmd', { line: `G10L20P0${side.axis}${value}` }).catch(() => {});
     const msg = `${side.axis} posé : la position actuelle vaut ${side.axis} ${value} (${side.radius ? `rayon ${r3(m.toolDia / 2)} + ` : ''}feuille ${m.paper} mm), donc ${side.axis}0 est sur ${side.axis === 'Z' ? 'le dessus de la pièce' : 'le bord'}.`;

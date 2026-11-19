@@ -133,3 +133,24 @@ test('pause : broche coupée puis rallumée avant la reprise', async () => {
     await waitFor(() => c.job.state === 'done', 30000);
   } finally { close(); }
 });
+
+test('palpage raté : G90 rétabli après déverrouillage', async () => {
+  const { c, close } = await setup();
+  try {
+    await c.cmd('G90G53G0X-10Y-10Z-5');
+    await c.sync();
+    await assert.rejects(probeZ(c, { travel: 5 }), /Pas de contact/);
+    await c.cmd('$X');
+    await waitFor(() => c.status.state === 'Idle');
+    await c.sync();
+    await c.cmd('$G');
+    assert.equal(c.modal.distance, 'G90', 'un G0 X10 ne doit pas devenir relatif');
+  } finally { close(); }
+});
+
+test('reprise : hauteur de sécurité minimale avec dégagements G53', () => {
+  const lines = splitProgram('G21G90\nG53G0Z0\nG0X10Y10\nG1Z-2F300\nG1X50F800\nG53G0Z0\nG0X10Y30\nG1Z-2F300\n');
+  const r = buildResume(lines, 7, { minSafeZ: 5 });
+  assert.equal(r.safeZ, 5);
+  assert.equal(r.lines.find((l) => l.startsWith('G0Z')), 'G0Z5');
+});

@@ -402,6 +402,23 @@ export class Viewer {
     this.render();
   }
 
+  // Ligne (index) dont un segment passe au plus près de p, parmi [lo, hi).
+  nearestLine(p, lo, hi) {
+    if (!this.path || !this.segLine?.length) return null;
+    let best = null, bestD = Infinity;
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), q = new THREE.Vector3(p.X, p.Y, p.Z), c = new THREE.Vector3();
+    const line = new THREE.Line3();
+    for (let s = 0; s < this.segLine.length; s++) {
+      const l = this.segLine[s];
+      if (l < lo || l >= hi) continue;
+      const v = this.segment(s);
+      line.set(a.set(v[0], v[1], v[2]), b.set(v[3], v[4], v[5]));
+      const d = line.closestPointToPoint(q, true, c).distanceToSquared(q);
+      if (d < bestD) { bestD = d; best = l; }
+    }
+    return best;
+  }
+
   setTarget(p) {
     this.target.visible = !!p;
     if (p) {

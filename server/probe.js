@@ -48,12 +48,18 @@ async function guard(c, fn) {
   if (!c.ready) throw new Error('Machine non connectée');
   if (c.status.state !== 'Idle') throw new Error(`La machine doit être Idle (état : ${c.status.state})`);
   if (c.job && ['running', 'paused', 'spinup', 'finishing'].includes(c.job.state)) throw new Error('Un job est en cours');
-  const distance = c.modal.distance;
+  // Modes à jour avant de commencer : le repère actif (G54…) décide où G10 écrit.
+  await c.cmd('$G', 'probe');
+  const restore = [c.modal.units, c.modal.distance];
   try {
     return await fn();
   } finally {
-    if (c.ready && c.status.state !== 'Alarm') {
-      await c.cmd(distance, 'probe').catch(() => {});
+    if (c.ready && c.status.state === 'Alarm') {
+      // Palpage raté : Grbl garde G91/G21 jusqu'au déverrouillage, on les
+      // rétablira à ce moment-là (sinon un G0 X10 deviendrait relatif).
+      c.restoreOnUnlock = restore;
+    } else if (c.ready) {
+      for (const l of restore) await c.cmd(l, 'probe').catch(() => {});
       await c.cmd('$G', 'probe').catch(() => {});
     }
   }
