@@ -368,7 +368,7 @@ Vous pouvez alors :
 
 1. remonter Z et changer l'outil (le jog fonctionne) ;
 2. refaire le zéro Z, par exemple avec **Palper Z** ;
-3. cliquer **Continuer**.
+3. cliquer **Continuer**. Le bouton reste grisé tant que la machine bouge encore : Grbl refuserait les lignes suivantes (`error:9`), dont celle qui relance la broche.
 
 > La broche n'est arrêtée que si votre programme l'a coupée (`M5`) avant le `M6`. Vérifiez qu'elle est à l'arrêt avant de toucher l'outil.
 
@@ -461,7 +461,7 @@ Tous les écrans ouverts voient et commandent **la même machine** en temps rée
 | Le jog s'arrête avant la fin | Limites logicielles atteintes (`$20=1`) : c'est voulu. Vérifiez que la course (`$130` à `$132`) correspond à la machine. |
 | `error:22` au démarrage | Le programme commence un usinage sans vitesse d'avance `F`. Corrigez le post-processeur de la FAO. |
 | `error:20` | Commande non gérée par Grbl (souvent un code spécifique à un autre contrôleur). Retirez-la du programme. |
-| `error:9` | La machine est en alarme : voir [section 4](#4-prise-dorigine-et-alarmes). |
+| `error:9` | La machine est en alarme (voir [section 4](#4-prise-dorigine-et-alarmes)) ou un déplacement manuel n'est pas fini. Copeau attend la fin des jogs avant d'envoyer le programme ; si une ligne est quand même refusée, le job s'arrête : reprenez à la ligne proposée dans l'onglet **Reprise**, la broche y est relancée. |
 | Le programme est décalé dans la vue | Le zéro ne correspond pas à celui prévu dans la FAO : vérifiez où la FAO place X0 Y0 Z0. |
 | Palpage : alarme 5 | Pas de contact : rapprochez l'outil, augmentez la course, ou vérifiez la pince. |
 | Palpage : alarme 4 | La sonde touchait déjà : vérifiez que la pince ne touche pas la plaque. |

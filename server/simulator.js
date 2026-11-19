@@ -222,7 +222,8 @@ export class GrblSimulator extends EventEmitter {
   execute(line) {
     if (!line) return null;
     if (line[0] === '$') return this.dollar(line);
-    if (this.alarm) return { err: 9 };
+    // Comme Grbl (protocol.c) : tout G-code est refusé en alarme ET pendant un jog.
+    if (this.alarm || this.machineState() === 'Jog') return { err: 9 };
     return this.gcode(line);
   }
 

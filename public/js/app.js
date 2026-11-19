@@ -347,6 +347,10 @@ function updateEnabled() {
   spBtn.title = m.spindleHeld ? 'La broche se rallumera à la reprise' : 'Arrêter la broche pendant la pause';
   spBtn.disabled = !!m.spindleHeld || !inPause || !(state === 'Hold' && m.status.subState === '0');
   $('#btn-stop').disabled = !jobActive || j.state === 'stopping';
+  const toolReady = idle && !jogSettling;
+  $('#btn-tool-continue').disabled = !toolReady;
+  $('#btn-tool-continue').title = toolReady ? '' : 'Attendez l\'arrêt complet de la machine';
+  $('#btn-tool-probe').disabled = !toolReady;
   $('#btn-probe').disabled = !idle || (jobActive && j.state !== 'toolchange');
   $('#btn-place').disabled = !canRun && !$('#btn-place').classList.contains('active');
   $('#btn-preview').disabled = !S.lines.length || (jobActive && !preview?.active);
@@ -598,6 +602,7 @@ function renderJob() {
   renderTimes();
   if (j.error && j.error !== lastJobError) { lastJobError = j.error; toast(j.error, 'err'); }
   $('#toolchange').hidden = j.state !== 'toolchange';
+  if (j.state === 'stopped' && j.resumeFrom !== null && lastJobState !== 'stopped') setupResume();
   if (j.state === 'toolchange') $('#tool-number').textContent = `T${j.tool}`;
   if (j.state === 'done' && lastJobState !== 'done') toast(`Job terminé en ${fmtDuration((j.finishedAt - j.startedAt) / 1000)}`, 'ok');
   lastJobState = j.state;
@@ -674,7 +679,9 @@ function setupResume() {
   // les lignes bien avant de les exécuter. On repart de la ligne du parcours la
   // plus proche de la position réelle de l'outil.
   let suggested = 1;
-  if (S.job && ['stopped', 'paused'].includes(S.job.state)) {
+  if (S.job?.state === 'stopped' && S.job.resumeFrom !== null && S.job.resumeFrom !== undefined) {
+    suggested = S.job.resumeFrom + 1;
+  } else if (S.job && ['stopped', 'paused'].includes(S.job.state)) {
     const near = viewer.nearestLine(S.machine.status.wpos, Math.max(0, S.job.acked - 200), S.job.acked);
     suggested = near !== null ? near + 1 : Math.max(1, S.job.acked - 1);
   }

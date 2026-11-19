@@ -100,6 +100,8 @@ export class GrblController extends EventEmitter {
     this.motionSource = null; // origine du dernier mouvement envoyé (jog, job…)
     this.pointer = null; // tir de repérage laser en cours : { power }
     this.laserWarned = false;
+    // Rapports d'état reçus depuis le dernier jog acquitté (voir jogSettled).
+    this.statusSinceJog = Infinity;
   }
 
   get connected() { return !!this.transport; }
@@ -443,10 +445,24 @@ export class GrblController extends EventEmitter {
       this.log('info', `Job terminé : ${this.job.name}`);
       this.emitJob();
     }
+    if (this.statusSinceJog < 10) this.statusSinceJog++;
     const waiters = this.statusWaiters;
     this.statusWaiters = [];
     for (const w of waiters) w(s);
     this.emitState();
+    // Des lignes attendaient la fin d'un jog (voir pump).
+    if (this.queue.length || this.job?.state === 'running') this.pump();
+  }
+
+  // Grbl refuse tout G-code pendant un jog (error:9, « G-code bloqué pendant
+  // une alarme ou un jog »), même juste après le dernier « ok » du jog : la
+  // tête bouge encore. Le jog est fini quand la carte ne dit plus Jog sur deux
+  // rapports demandés après son acquittement. Smoothieware n'a pas ce verrou.
+  jogSettled() {
+    if (this.isSmoothie) return true;
+    if (this.status.state === 'Jog') return false;
+    if (this.inflight.some((i) => i.source === 'jog')) return false;
+    return this.statusSinceJog >= 2;
   }
 
   nextStatus(timeout = 2000) {
@@ -522,6 +538,9 @@ export class GrblController extends EventEmitter {
         fromJob = true;
       }
       if (!item) break;
+      // $J= et commandes $ passent ; le G-code (programme, console, macros,
+      // palpage) attend que le jog soit vraiment terminé.
+      if (item.line[0] !== '$' && !this.jogSettled()) break;
       const len = Buffer.byteLength(item.line) + 1;
       if (this.inflight.length && this.inflightBytes + len > RX_BUFFER) break;
       if (fromJob) this.jobTake(item);
@@ -539,6 +558,7 @@ export class GrblController extends EventEmitter {
     const item = this.inflight.shift();
     if (!item) return;
     this.inflightBytes -= item.len;
+    if (item.source === 'jog') this.statusSinceJog = 0;
     if (code !== null) {
       const err = new GrblError(code, item.line);
       if (item.source !== 'sync' && item.source !== 'query') this.log('err', err.message);
@@ -548,7 +568,17 @@ export class GrblController extends EventEmitter {
           // Smoothieware s'arrête (HALT) et vide sa file : impossible de
           // continuer tel quel, il faudra reprendre à une ligne.
           this.job.state = 'stopped';
+          this.job.resumeFrom = item.jobIndex;
           this.job.error += ' · Déverrouillez puis utilisez l\'onglet Reprise.';
+        } else if (code === 9) {
+          // Ligne refusée parce que la carte était en alarme ou en jog : elle
+          // n'a pas été exécutée (souvent le M3 qui relance la broche). Une
+          // simple reprise la sauterait et continuerait broche arrêtée : on
+          // arrête et on propose de reprendre à cette ligne (broche relancée).
+          const msg = `${this.job.error} · Ligne non exécutée : reprenez à la ligne ${item.jobIndex + 1} (onglet Reprise), la broche sera relancée.`;
+          this.job.resumeFrom = item.jobIndex;
+          this.stopJob().finally(() => { this.job.error = msg; this.emitJob(); });
+          this.job.error = msg;
         } else {
           this.job.state = 'paused';
           this.realtime('hold');
@@ -588,6 +618,7 @@ export class GrblController extends EventEmitter {
     if (this.status.state !== 'Idle') throw new Error(`La machine doit être Idle (état : ${this.status.state})`);
     if (this.pointer) throw new Error('Éteignez d\'abord le tir de repérage');
     from = Math.max(0, Math.min(Math.floor(from), j.lines.length - 1));
+    j.resumeFrom = null;
     j.prelude = from > 0 ? buildResume(j.lines, from, { ...opts, laser: this.profile.laser, firmware: this.profile.firmware }).lines : [];
     if (from > 0) this.log('info', `Reprise à la ligne ${from + 1} : ${j.prelude.join(' | ')}`);
     j.next = from;
@@ -646,6 +677,8 @@ export class GrblController extends EventEmitter {
   continueAfterToolChange() {
     const j = this.job;
     if (j?.state !== 'toolchange') throw new Error('Pas de changement d\'outil en attente');
+    if (this.status.state === 'Alarm') throw new Error('Machine en alarme : déverrouillez ou faites l\'origine avant de continuer');
+    if (!this.jogSettled()) this.log('info', 'Fin du déplacement en cours, puis reprise du programme');
     j.next++;
     j.acked = Math.max(j.acked, j.next);
     j.state = 'running';
@@ -860,7 +893,7 @@ export class GrblController extends EventEmitter {
     return {
       name: j.name, total: j.lines.length, acked: j.acked, sent: j.next, startIndex: j.startIndex,
       state: j.state, error: j.error, tool: j.tool, startedAt: j.startedAt, finishedAt: j.finishedAt,
-      spinUpUntil: j.spinUpUntil ?? null, spindleHeld: this.spindleHeld,
+      spinUpUntil: j.spinUpUntil ?? null, spindleHeld: this.spindleHeld, resumeFrom: j.resumeFrom ?? null,
     };
   }
 

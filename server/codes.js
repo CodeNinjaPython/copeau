@@ -8,7 +8,7 @@ const ERRORS = {
   6: 'Durée d\'impulsion trop courte (min 3 µs)',
   7: 'Lecture EEPROM échouée, réglages par défaut restaurés',
   8: 'Commande $ refusée hors état Idle',
-  9: 'G-code bloqué pendant une alarme ou un jog',
+  9: 'G-code bloqué pendant une alarme ou un jog (déverrouillez, ou attendez la fin du déplacement)',
   10: 'Limites logicielles impossibles sans prise d\'origine',
   11: 'Ligne trop longue',
   12: 'Pas de moteur trop rapide pour la fréquence max',
