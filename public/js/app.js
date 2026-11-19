@@ -327,6 +327,10 @@ const parseJog = (spec) => Object.fromEntries(spec.split(' ').map((p) => [p[0], 
 // (1, 1, 1… ou 10, 10, 10…) au rythme où la machine le parcourt, avec un pas
 // d'avance pour un mouvement fluide. Au relâchement, arrêt immédiat là où se
 // trouve la tête (jog cancel). ■ ou Échap arrêtent aussi net.
+// Nombre de jogs en train de s'arrêter : les zéros restent grisés pendant ce
+// temps, pour être posés à la position finale.
+let jogSettling = 0;
+
 function makeJogger() {
   let holdTimer = null, repeatTimer = null, dir = null, step = 1, stopping = false;
   const feed = () => Number($('#jog-feed').value) || 1000;

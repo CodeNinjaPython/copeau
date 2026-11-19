@@ -8,7 +8,8 @@
     "start": "node server/index.js",
     "desktop": "electron .",
     "build:portable": "electron-builder --win portable",
-    "test": "node --test test/*.test.js"
+    "test": "eslint . && node --test test/*.test.js",
+    "lint": "eslint ."
   },
   "engines": {
     "node": ">=20"
@@ -23,7 +24,9 @@
   },
   "devDependencies": {
     "electron": "^39.2.7",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "eslint": "10.14.0",
+    "globals": "17.14.0"
   },
   "build": {
     "appId": "fr.copeau.desktop",
