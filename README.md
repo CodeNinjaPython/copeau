@@ -19,11 +19,19 @@ HOST=0.0.0.0 npm start
 
 Attention : n'importe qui sur ce réseau peut alors commander la machine.
 
+## Documentation
+
+- **Manuel d'utilisation** : [docs/MANUEL.md](docs/MANUEL.md), aussi disponible dans l'application (bouton **Manuel**).
+- **Démo guidée** : s'ouvre au premier lancement, puis avec le bouton **?**. Elle se termine par un essai complet sur le simulateur avec un programme d'exemple ([public/demo/copeau-demo.nc](public/demo/copeau-demo.nc)).
+
 ## Fonctions
 
 - **Position** travail et machine, zéro par axe, retour X0 Y0.
 - **Jog** : appui court = un pas, appui maintenu = mouvement continu jusqu'au relâchement. Clavier : flèches (X/Y), PgUp/PgDn (Z). Le jog s'arrête si l'écran se déconnecte.
-- **Visualiseur 3D** du parcours d'outil : la partie usinée se colore en orange en direct.
+- **Visualiseur 3D** du parcours d'outil avec suivi en temps réel : position de l'outil, partie usinée en orange, temps restant.
+- **Placer** : glisser le parcours sur le plateau, l'origine X/Y est décalée d'autant.
+- **Plateau et zone de travail** : rectangle (2 coins) ou cercle, vérification que le programme tient, parcours du contour.
+- **Clic sur le plateau** pour y amener la tête.
 - **Jobs** : glisser-déposer un fichier, durée estimée, temps restant, pause, arrêt propre (maintien d'avance puis reset, sans perte de position).
 - **Erreur Grbl pendant un job** : le job se met en pause au lieu de continuer.
 - **Changement d'outil (M6)** : le job attend la fin des mouvements, affiche l'outil demandé et propose de refaire le Z.

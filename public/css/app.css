@@ -20,6 +20,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0;
@@ -263,6 +264,35 @@ input[type=range] { width: 100%; accent-color: var(--accent); padding: 0; border
 .fit-status.ok { color: var(--ok); }
 .fit-status.bad { color: #ff8a87; }
 .viewer-hint.drawing { color: var(--ok); font-size: 14px; font-weight: 600; }
+
+/* ---- Démo guidée ---- */
+.tour { position: fixed; inset: 0; z-index: 80; }
+.tour-spot {
+  position: fixed; border-radius: 12px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(5, 6, 8, .72), 0 0 0 2px var(--accent) inset;
+  transition: all .25s ease;
+}
+.tour-card {
+  position: fixed; width: min(360px, calc(100vw - 32px)); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .5); transition: left .25s ease, top .25s ease;
+}
+.tour-step { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .5px; }
+.tour-title { margin: 4px 0 8px; font-size: 17px; }
+.tour-body { color: #c5cad3; line-height: 1.5; }
+.tour-body p { margin: 0 0 8px; }
+.tour-body ul { margin: 0 0 8px; padding-left: 18px; }
+.tour-body kbd { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+.tour-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.tour-nav { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+.help { display: flex; gap: 6px; }
+.help a { color: inherit; text-decoration: none; }
+.help .file-btn { min-width: 0; }
+.pulse { animation: glow 1.4s ease-in-out 4; }
+@keyframes glow { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 45%, transparent); } }
+.viewer-tools button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.viewer.placing { cursor: grab; }
+.viewer.placing.dragging { cursor: grabbing; }
 
 /* ---- Modale ---- */
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, .6); display: grid; place-items: center; z-index: 50; padding: 16px; }

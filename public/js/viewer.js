@@ -79,9 +79,37 @@ export class Viewer {
     let down = null;
     el.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
     el.addEventListener('pointerup', (e) => {
-      if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+      if (this.placing || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
       this.pick(e);
     });
+
+    // Mode « Placer » : glisser (bouton gauche / un doigt) déplace le parcours.
+    this.placing = null;
+    let drag = null;
+    el.addEventListener('pointerdown', (e) => {
+      if (!this.placing || !this.path || e.button !== 0) return;
+      const p = this.planePoint(e);
+      if (!p) return;
+      drag = { start: p, base: { x: this.path.position.x, y: this.path.position.y } };
+      el.setPointerCapture(e.pointerId);
+      el.classList.add('dragging');
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const p = this.planePoint(e);
+      if (!p) return;
+      const d = { X: drag.base.x + p.X - drag.start.X, Y: drag.base.y + p.Y - drag.start.Y };
+      this.setPathOffset(d);
+      this.placing.onMove?.(d);
+    });
+    const endDrag = () => {
+      if (!drag) return;
+      drag = null;
+      el.classList.remove('dragging');
+      this.placing?.onDrop?.({ X: this.path.position.x, Y: this.path.position.y });
+    };
+    el.addEventListener('pointerup', endDrag);
+    el.addEventListener('pointercancel', endDrag);
     let hoverQueued = false;
     el.addEventListener('pointermove', (e) => {
       if (!this.onHover || hoverQueued) return;
@@ -270,6 +298,20 @@ export class Viewer {
     const changed = (this.shapesBox ? JSON.stringify(this.shapesBox) : '') !== (box.isEmpty() ? '' : JSON.stringify(box));
     this.shapesBox = box.isEmpty() ? null : box;
     if (changed) this.fitGrid();
+    this.render();
+  }
+
+  setPlaceMode(handlers) {
+    this.placing = handlers;
+    this.controls.enableRotate = !handlers;
+    this.el.classList.toggle('placing', !!handlers);
+    if (!handlers) this.setPathOffset({ X: 0, Y: 0 });
+  }
+
+  // Décalage d'affichage du parcours (aperçu avant de déplacer l'origine).
+  setPathOffset(d) {
+    if (!this.path) return;
+    this.path.position.set(d.X, d.Y, 0);
     this.render();
   }
 

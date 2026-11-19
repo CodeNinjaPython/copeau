@@ -1,4 +1,5 @@
 import { Viewer, outline } from './viewer.js';
+import { startTour } from './tour.js';
 import { splitProgram, analyze, buildResume } from './shared/gcode.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -246,6 +247,7 @@ function updateEnabled() {
   pauseBtn.textContent = j?.state === 'paused' || (j?.state === 'running' && machineHeld) ? 'Reprendre' : 'Pause';
   $('#btn-stop').disabled = !jobActive || j.state === 'stopping';
   $('#btn-probe').disabled = !idle || (jobActive && j.state !== 'toolchange');
+  $('#btn-place').disabled = !canRun && !$('#btn-place').classList.contains('active');
   const zoneOutline = $('.zone-card[data-target="zone"] [data-outline]');
   if (zoneOutline) {
     zoneOutline.disabled = !S.zones.zone || !canJog;
@@ -335,7 +337,7 @@ function jogBlockedReason() {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { act('jogStop').catch(() => {}); closeGoto(); stopDraw(); return; }
+  if (e.key === 'Escape') { act('jogStop').catch(() => {}); closeGoto(); stopDraw(); stopPlace(); return; }
   if (!KEYS[e.key] || typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
   e.preventDefault();
   if (e.target.tagName === 'SELECT') e.target.blur();
@@ -736,12 +738,13 @@ function renderZoneCard(target) {
     : pointRow('Coin 1', 'a', d.a, 'Capturer') + pointRow('Coin 2', 'b', d.b, 'Capturer');
 }
 
-function fitCheck() {
+// offset : décalage du programme à tester (mode « Placer »), repère travail.
+function fitCheck(offset = { X: 0, Y: 0 }) {
   const i = S.info;
   if (!i || !Number.isFinite(i.min.X)) return null;
   const corners = [
     { X: i.min.X, Y: i.min.Y }, { X: i.max.X, Y: i.min.Y }, { X: i.max.X, Y: i.max.Y }, { X: i.min.X, Y: i.max.Y },
-  ];
+  ].map((p) => ({ X: p.X + offset.X, Y: p.Y + offset.Y }));
   const zone = shapeToWork(S.zones.zone);
   const table = shapeToWork(S.zones.table);
   const size = `${fmtNum(i.max.X - i.min.X)} × ${fmtNum(i.max.Y - i.min.Y)} mm`;
@@ -888,6 +891,202 @@ $('#btn-outline-job').onclick = () => {
 $('#zone-safe-z').value = store.get('safeZ', 5);
 $('#zone-safe-z').onchange = () => store.set('safeZ', safeZ());
 
+
+// ---- Placer le programme sur le plateau ------------------------------------
+// On glisse le parcours ; à la validation, l'origine X/Y est décalée d'autant
+// (G10 L20 sur la position actuelle). Le fichier G-code ne change pas.
+
+let placeDelta = null;
+function canPlace() {
+  const j = S.job;
+  const jobActive = ['running', 'paused', 'finishing', 'stopping', 'toolchange'].includes(j?.state);
+  return S.machine.ready && S.machine.status.state === 'Idle' && !jobActive;
+}
+function startPlace() {
+  if (!S.lines.length) return toast('Chargez d\'abord un programme', 'err');
+  if (!canPlace()) return toast('La machine doit être Prêt, sans usinage en cours', 'err');
+  closeGoto();
+  stopDraw();
+  placeDelta = null;
+  $('#btn-place').classList.add('active');
+  const hint = $('#viewer-hint');
+  hint.classList.add('drawing');
+  hint.textContent = 'Glissez le parcours pour le placer · clic droit = déplacer la vue · Échap pour annuler';
+  if (S.zones.table || S.zones.zone) viewer.view('top');
+  viewer.setPlaceMode({
+    onMove: (d) => { placeDelta = d; showPlacePop(false); },
+    onDrop: (d) => { placeDelta = d; showPlacePop(true); },
+  });
+}
+function showPlacePop(final) {
+  const d = placeDelta;
+  $('#viewer-hint').textContent = `Décalage X ${fmtSigned(d.X)}  Y ${fmtSigned(d.Y)} mm`;
+  const pop = $('#place-pop');
+  pop.hidden = !final;
+  if (!final) return;
+  $('#place-delta').innerHTML = `<b>ΔX</b> ${fmtSigned(d.X)} &nbsp; <b>ΔY</b> ${fmtSigned(d.Y)} mm`;
+  const fit = fitCheck(d);
+  const el = $('#place-fit');
+  el.textContent = fit ? fit.text.replace('avec le zéro actuel', 'à cette position') : '';
+  el.className = `small ${fit ? (fit.ok ? 'fit-status ok' : 'fit-status bad') : ''}`;
+  pop.style.left = '50%';
+  pop.style.top = '64px';
+  pop.style.transform = 'translateX(-50%)';
+}
+function stopPlace() {
+  if (!$('#btn-place').classList.contains('active')) return;
+  $('#btn-place').classList.remove('active');
+  $('#place-pop').hidden = true;
+  placeDelta = null;
+  viewer.setPlaceMode(null);
+  setHint();
+}
+const fmtSigned = (v) => `${v >= 0 ? '+' : ''}${(Math.round(v * 10) / 10).toFixed(1)}`;
+$('#btn-place').onclick = () => ($('#btn-place').classList.contains('active') ? stopPlace() : startPlace());
+$('#place-cancel').onclick = stopPlace;
+$('#place-apply').onclick = async () => {
+  const d = placeDelta;
+  if (!d || !canPlace()) return toast('La machine doit être Prêt', 'err');
+  const fit = fitCheck(d);
+  if (fit && !fit.ok && !confirm(`${fit.text.replace('avec le zéro actuel', 'à cette position')}\n\nPlacer quand même ?`)) return;
+  // Le zéro se déplace de +d : la position actuelle vaut alors (travail - d).
+  const w = S.machine.status.wpos;
+  const x = Math.round((w.X - d.X) * 1000) / 1000, y = Math.round((w.Y - d.Y) * 1000) / 1000;
+  await act('cmd', { line: `G10L20P0X${x}Y${y}` }).then(() => {
+    toast(`Programme déplacé de X ${fmtSigned(d.X)} Y ${fmtSigned(d.Y)} mm (origine décalée)`, 'ok');
+  }).catch(() => {});
+  stopPlace();
+};
+
+// ---- Démo guidée -------------------------------------------------------------
+
+const TOUR = [
+  {
+    title: 'Bienvenue dans Copeau',
+    body: `<p>Copeau pilote une CNC <b>Grbl / grblHAL</b> depuis le navigateur.</p>
+      <p>Cette démo présente l'écran en 12 étapes. Utilisez <kbd>→</kbd> / <kbd>←</kbd> ou les boutons. À la fin, vous pourrez tout essayer sur une <b>machine simulée</b>, sans risque.</p>
+      <p class="muted">Gardez toujours l'arrêt d'urgence de la vraie machine à portée de main.</p>`,
+  },
+  {
+    target: '.connect', title: 'Connexion',
+    body: `<p>Choisissez le port USB de la carte (ou <b>Simulateur Grbl</b>), laissez <b>115200</b>, puis <b>Connecter</b>.</p>
+      <p><b>↻</b> rafraîchit la liste si vous venez de brancher la machine.</p>`,
+  },
+  {
+    target: '.machine-state', title: 'État de la machine',
+    body: `<p>Le badge indique l'état : <b>Prêt</b>, <b>Usinage</b>, <b>Pause</b> ou <b>Alarme</b>.</p>
+      <ul><li><b>Origine</b> : prise d'origine sur les fins de course (à faire au démarrage).</li>
+      <li><b>Déverrouiller</b> : lève une alarme si la position est sûre.</li>
+      <li><b>Reset</b> : réinitialise la carte (ce n'est pas un arrêt d'urgence).</li></ul>`,
+  },
+  {
+    target: '.dro', title: 'Position et zéro',
+    body: `<p>Les grands chiffres sont la <b>position travail</b>, la petite ligne <b>M</b> la position machine.</p>
+      <p><b>X = 0</b>, <b>Y = 0</b>, <b>Z = 0</b> posent l'origine de la pièce là où est l'outil. <b>Cliquez sur un chiffre</b> pour taper une valeur précise (ex. épaisseur d'une cale).</p>`,
+  },
+  {
+    target: '.jog', title: 'Déplacer la tête',
+    body: `<p><b>Appui court</b> = un pas de la taille choisie, <b>appui maintenu</b> = mouvement continu jusqu'au relâchement.</p>
+      <p>Au clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> pour X/Y, <kbd>PgUp</kbd><kbd>PgDn</kbd> pour Z, <kbd>Échap</kbd> pour arrêter.</p>`,
+  },
+  {
+    target: '.viewer-wrap', title: 'Vue 3D et suivi en temps réel',
+    body: `<p>Le parcours d'outil s'affiche en <b>bleu</b> (usinage) et <b>gris</b> (rapides). Le cône jaune est l'outil, mis à jour 5 fois par seconde.</p>
+      <p>Pendant l'usinage, la partie faite passe en <b>orange</b> en direct.</p>
+      <p>Glisser = tourner, molette = zoom. <b>Cliquez sur le plateau</b> pour y amener la tête.</p>`,
+  },
+  {
+    target: '#btn-place', title: 'Placer le programme',
+    body: `<p><b>Placer</b> permet de glisser le parcours sur le plateau. Copeau indique si la nouvelle position tient dans la zone, puis décale l'origine X/Y d'autant.</p>`,
+  },
+  {
+    target: '.job-bar', title: 'Programme',
+    body: `<p><b>Ouvrir</b> ou glissez un fichier G-code sur la vue. Vous voyez la durée estimée et les dimensions.</p>
+      <p><b>Démarrer</b>, <b>Pause</b> / <b>Reprendre</b>, <b>Arrêter</b> (arrêt propre, la position est conservée). La barre montre la progression et le temps restant.</p>`,
+  },
+  {
+    target: '.overrides', title: 'Corrections en direct',
+    body: `<p>Accélérez ou ralentissez l'<b>avance</b>, la <b>broche</b> et les <b>rapides</b> pendant l'usinage, sans toucher au fichier.</p>`,
+  },
+  {
+    target: '.panel.right', title: 'Palpage', before: () => showTab('probe'),
+    body: `<p>Avec une sonde (pince sur l'outil + plaque), Copeau trouve l'origine tout seul : <b>Z</b> sur le dessus, un <b>coin XYZ</b>, ou le <b>centre d'un trou</b>.</p>`,
+  },
+  {
+    target: '.panel.right', title: 'Plateau et zone de travail', before: () => showTab('zones'),
+    body: `<p>Définissez le <b>plateau</b> et la <b>zone de travail</b> (rectangle par 2 coins, ou cercle) : en capturant la position de l'outil, en traçant sur la vue, ou en tapant les valeurs.</p>
+      <p>Copeau vérifie que le programme tient dedans et peut <b>parcourir le contour</b>.</p>`,
+  },
+  {
+    target: '.panel.right', title: 'Reprise, console, macros', before: () => showTab('resume'),
+    body: `<p><b>Reprise</b> : relance un usinage interrompu à une ligne choisie (ou en cliquant sur le parcours).</p>
+      <p><b>Console</b> pour les commandes, <b>Macros</b> pour vos séquences favorites, <b>Réglages</b> pour les paramètres $ de la carte.</p>`,
+  },
+  {
+    target: '.help', title: 'À vous de jouer', before: () => showTab('console'),
+    body: `<p>Le bouton <b>?</b> relance cette démo, <b>Manuel</b> ouvre le mode d'emploi complet.</p>
+      <p>Pour essayer maintenant : Copeau connecte la machine simulée, fait l'origine, pose le zéro sur une pièce virtuelle et charge un programme de démonstration.</p>`,
+    actions: [{ label: 'Essayer avec le simulateur', primary: true, run: () => tryDemo() }],
+  },
+];
+
+function runTour(start = 0) {
+  closeGoto();
+  stopDraw();
+  stopPlace();
+  startTour(TOUR, { start, onClose: () => store.set('tourDone', true) });
+}
+$('#btn-tour').onclick = () => runTour();
+
+async function waitUntil(fn, ms = 15000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (fn()) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('La machine simulée ne répond pas');
+}
+
+// Installe une séance d'essai sur le simulateur. Ne touche jamais une vraie machine.
+async function tryDemo() {
+  try {
+    const m = S.machine;
+    if (m.connected && m.port !== 'simulateur') {
+      return toast('Une vraie machine est connectée : déconnectez-la pour essayer le simulateur.', 'err');
+    }
+    if (['running', 'paused', 'toolchange', 'finishing'].includes(S.job?.state)) return toast('Un usinage est en cours', 'err');
+    toast('Préparation de la démo…');
+    if (!m.connected) {
+      $('#port').value = 'simulateur';
+      await request('connect', { port: 'simulateur' });
+    }
+    await waitUntil(() => S.machine.ready);
+    if (S.machine.status.state === 'Alarm') {
+      await request('cmd', { line: '$H' });
+      await waitUntil(() => S.machine.status.state === 'Idle', 30000);
+    }
+    // Zéro sur le coin avant gauche de la pièce virtuelle, dessus à Z −50 machine,
+    // avec 10 mm de marge.
+    await request('cmd', { line: 'G10L2P1X-210Y-190Z-50\nG90G0Z5\n$#\n$G' });
+    const text = await fetch('/demo/copeau-demo.nc').then((r) => r.text());
+    await request('load', { name: 'copeau-demo.nc', text });
+    if (!S.zones.zone && !S.zones.table) {
+      await request('setConfig', { key: 'zones', value: {
+        table: { kind: 'rect', a: { X: -1, Y: -1 }, b: { X: -300, Y: -300 } },
+        zone: { kind: 'rect', a: { X: -220, Y: -200 }, b: { X: -120, Y: -100 } },
+      } });
+    }
+    showTab('zones');
+    toast('Démo prête : cliquez sur Démarrer pour lancer l\'usinage simulé', 'ok');
+    const run = $('#btn-run');
+    run.classList.remove('pulse');
+    void run.offsetWidth;
+    run.classList.add('pulse');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
 // ---- Macros ----------------------------------------------------------------
 
 let editingMacro = null;
@@ -986,3 +1185,6 @@ function escapeHtml(s) {
 
 renderMachine();
 connectWs();
+const tourParam = new URLSearchParams(location.search).get('tour');
+if (tourParam !== null) setTimeout(() => runTour(Math.max(0, Number(tourParam) || 0)), 600);
+else if (!store.get('tourDone', false)) setTimeout(() => runTour(), 600);

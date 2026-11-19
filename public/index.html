@@ -30,6 +30,10 @@
       <button id="btn-unlock" class="ghost" title="Déverrouiller ($X)">Déverrouiller</button>
       <button id="btn-home" class="ghost" title="Prise d'origine ($H)">Origine</button>
       <button id="btn-reset" class="danger" title="Reset logiciel (Ctrl-X)">Reset</button>
+      <div class="help">
+        <button id="btn-tour" class="ghost icon" title="Démo guidée">?</button>
+        <a class="file-btn" href="/manuel" target="_blank" rel="noopener" title="Manuel d'utilisation">Manuel</a>
+      </div>
     </div>
   </header>
 
@@ -102,6 +106,7 @@
         <button data-view="top" class="ghost">Dessus</button>
         <button data-view="front" class="ghost">Face</button>
         <button data-view="fit" class="ghost">Cadrer</button>
+        <button id="btn-place" class="ghost" title="Glisser le parcours pour le placer sur le plateau">Placer</button>
       </div>
       <div class="drop-hint" id="drop-hint">Glissez un fichier G-code ici</div>
       <div class="goto-pop" id="goto-pop" hidden>
@@ -110,6 +115,15 @@
         <div class="row gap">
           <button id="goto-go" class="primary grow">Aller ici</button>
           <button id="goto-cancel" class="ghost" title="Annuler (Échap)">✕</button>
+        </div>
+      </div>
+      <div class="goto-pop" id="place-pop" hidden>
+        <div class="goto-coords" id="place-delta"></div>
+        <div class="small" id="place-fit"></div>
+        <p class="muted small">Le fichier ne change pas : Copeau décale l'origine X/Y d'autant.</p>
+        <div class="row gap">
+          <button id="place-apply" class="primary grow">Appliquer</button>
+          <button id="place-cancel" class="ghost" title="Annuler (Échap)">✕</button>
         </div>
       </div>
       <div class="viewer-hint muted small" id="viewer-hint">Cliquez sur le plateau pour y amener la tête · flèches / PgUp / PgDn pour déplacer · Échap = stop</div>
