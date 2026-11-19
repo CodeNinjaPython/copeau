@@ -250,6 +250,17 @@ export class GrblController extends EventEmitter {
     });
   }
 
+  // Retire de la file les lignes pas encore envoyées d'une source (ex. jogs
+  // en attente au moment d'une annulation), pour qu'elles ne partent pas après.
+  dropQueued(source) {
+    const kept = [];
+    for (const item of this.queue) {
+      if (item.source === source) item.reject?.(new Error('Annulé'));
+      else kept.push(item);
+    }
+    this.queue = kept;
+  }
+
   // Attend que tous les mouvements planifiés soient exécutés.
   async sync() {
     await this.cmd('G4P0.01', 'sync');
