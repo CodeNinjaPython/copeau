@@ -24,12 +24,18 @@
       </select>
       <button id="btn-refresh" class="ghost icon" title="Rafraîchir les ports">↻</button>
       <button id="btn-connect" class="primary">Connecter</button>
+      <button type="button" class="ibtn" data-info="connect" aria-label="Plus d'informations" aria-expanded="false">i</button>
     </div>
     <div class="machine-state">
       <span id="state-badge" class="badge">Déconnecté</span>
       <button id="btn-unlock" class="ghost" title="Déverrouiller ($X)">Déverrouiller</button>
       <button id="btn-home" class="ghost" title="Prise d'origine ($H)">Origine</button>
       <button id="btn-reset" class="danger" title="Reset logiciel (Ctrl-X)">Reset</button>
+      <button type="button" class="ibtn" data-info="state" aria-label="Plus d'informations" aria-expanded="false">i</button>
+      <div class="help">
+        <button id="btn-tour" class="ghost icon" title="Démo guidée">?</button>
+        <a class="file-btn" href="/manuel" target="_blank" rel="noopener" title="Manuel d'utilisation">Manuel</a>
+      </div>
     </div>
   </header>
 
@@ -40,7 +46,7 @@
     <section class="panel left">
       <div class="dro">
         <div class="dro-head">
-          <span>Position travail <b id="wcs-name">G54</b></span>
+          <span>Position travail <b id="wcs-name">G54</b> <button type="button" class="ibtn" data-info="dro" aria-label="Plus d'informations" aria-expanded="false">i</button></span>
           <span class="muted small" id="units">mm</span>
         </div>
         <div class="dro-rows" id="dro"></div>
@@ -52,7 +58,7 @@
       </div>
 
       <div class="jog">
-        <div class="section-title">Déplacement <span class="muted small">flèches · PgUp/PgDn · maintenir = continu</span></div>
+        <div class="section-title"><span>Déplacement <button type="button" class="ibtn" data-info="jog" aria-label="Plus d'informations" aria-expanded="false">i</button></span><span class="muted small">flèches · PgUp/PgDn · maintenir = continu</span></div>
         <div class="jog-grid">
           <button data-jog="X-1 Y1" class="jog-btn diag">↖</button>
           <button data-jog="Y1" class="jog-btn">Y+</button>
@@ -72,12 +78,12 @@
           <button data-step="1">1</button><button data-step="10">10</button><button data-step="50">50</button>
         </div>
         <label class="field inline">Vitesse jog
-          <input id="jog-feed" type="number" min="10" step="100" value="2000"><span class="muted">mm/min</span>
+          <input id="jog-feed" type="number" min="10" step="100" value="2000"><span class="muted">mm/min</span> <button type="button" class="ibtn" data-info="jogFeed" aria-label="Plus d'informations" aria-expanded="false">i</button>
         </label>
       </div>
 
       <div class="overrides">
-        <div class="section-title">Corrections en direct</div>
+        <div class="section-title"><span>Corrections en direct <button type="button" class="ibtn" data-info="overrides" aria-label="Plus d'informations" aria-expanded="false">i</button></span></div>
         <div class="ov" data-ov="feed">
           <span>Avance</span><b id="ov-feed">100%</b>
           <button data-rt="feedMinus10">−10</button><button data-rt="feed100">100</button><button data-rt="feedPlus10">+10</button>
@@ -102,22 +108,51 @@
         <button data-view="top" class="ghost">Dessus</button>
         <button data-view="front" class="ghost">Face</button>
         <button data-view="fit" class="ghost">Cadrer</button>
+        <button id="btn-place" class="ghost" title="Glisser le parcours pour le placer sur le plateau">Placer</button>
+        <button id="btn-preview" class="ghost" title="Voir l'usinage simulé avant de lancer">▶ Simuler</button>
+        <button type="button" class="ibtn" data-info="viewer" aria-label="Plus d'informations" aria-expanded="false">i</button>
       </div>
       <div class="drop-hint" id="drop-hint">Glissez un fichier G-code ici</div>
       <div class="goto-pop" id="goto-pop" hidden>
         <div class="goto-coords" id="goto-coords"></div>
-        <label class="check small"><input type="checkbox" id="goto-lift" checked> Monter d'abord à Z <span id="goto-safe">5</span></label>
+        <label class="check small"><input type="checkbox" id="goto-lift" checked> Monter d'abord à Z <span id="goto-safe">5</span> <button type="button" class="ibtn" data-info="gotoLift" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
         <div class="row gap">
           <button id="goto-go" class="primary grow">Aller ici</button>
           <button id="goto-cancel" class="ghost" title="Annuler (Échap)">✕</button>
         </div>
       </div>
+      <div class="goto-pop" id="place-pop" hidden>
+        <div class="goto-coords" id="place-delta"></div>
+        <div class="small" id="place-fit"></div>
+        <p class="muted small">Le fichier ne change pas : Copeau décale l'origine X/Y d'autant.</p>
+        <div class="row gap">
+          <button id="place-apply" class="primary grow">Appliquer</button>
+          <button id="place-cancel" class="ghost" title="Annuler (Échap)">✕</button>
+        </div>
+      </div>
       <div class="viewer-hint muted small" id="viewer-hint">Cliquez sur le plateau pour y amener la tête · flèches / PgUp / PgDn pour déplacer · Échap = stop</div>
+      <div class="playbar" id="playbar" hidden>
+        <button id="pb-play" class="primary pb-btn" title="Lecture / pause (Espace)">▶</button>
+        <button id="pb-restart" class="ghost pb-btn" title="Revenir au début">⏮</button>
+        <div class="pb-track">
+          <input id="pb-scrub" type="range" min="0" max="1000" step="1" value="0" aria-label="Position dans la simulation">
+          <div class="pb-info"><span id="pb-time">0 s / 0 s</span><span id="pb-line" class="pb-code"></span></div>
+        </div>
+        <select id="pb-speed" title="Vitesse de la simulation">
+          <option value="1">1×</option><option value="2">2×</option><option value="5" selected>5×</option>
+          <option value="10">10×</option><option value="25">25×</option><option value="100">100×</option>
+        </select>
+        <label class="pb-opt" title="Diamètre de la fraise simulée">Ø <input id="pb-tool" type="number" min="0.1" step="0.1" value="6"></label>
+        <label class="check pb-opt"><input type="checkbox" id="pb-stock" checked> Matière</label>
+        <button type="button" class="ibtn" data-info="sim" aria-label="Plus d'informations" aria-expanded="false">i</button>
+        <button id="pb-close" class="ghost pb-btn" title="Quitter la simulation">✕</button>
+      </div>
       <div class="job-bar" id="job-bar">
         <div class="job-name"><span id="job-name">Aucun programme</span><span class="muted small" id="job-meta"></span></div>
         <div class="progress"><div id="job-progress"></div></div>
         <div class="job-times muted small"><span id="job-elapsed"></span><span id="job-remaining"></span></div>
         <div class="job-actions">
+          <button type="button" class="ibtn" data-info="job" aria-label="Plus d'informations" aria-expanded="false">i</button>
           <label class="ghost file-btn">Ouvrir<input id="file-input" type="file" accept=".nc,.gcode,.ngc,.tap,.gc,.cnc,.txt" hidden></label>
           <button id="btn-run" class="primary">Démarrer</button>
           <button id="btn-pause" class="warn">Pause</button>
@@ -151,17 +186,18 @@
           <button data-cmd="M3 S10000" class="ghost small">M3 S10000</button>
           <button data-cmd="M5" class="ghost small">M5</button>
           <button id="btn-clear-console" class="ghost small">Effacer</button>
+          <button type="button" class="ibtn" data-info="console" aria-label="Plus d'informations" aria-expanded="false">i</button>
         </div>
       </div>
 
       <div class="tab" data-pane="resume" hidden>
         <p class="muted">Reprendre un usinage interrompu à partir d'une ligne. Copeau restaure les modes, démarre la broche, remonte au Z de sécurité, se place au-dessus du point puis plonge doucement.</p>
-        <label class="field">Ligne de reprise
+        <label class="field"><span>Ligne de reprise <button type="button" class="ibtn" data-info="resume" aria-label="Plus d'informations" aria-expanded="false">i</button></span>
           <input id="resume-line" type="number" min="1" value="1">
         </label>
         <input id="resume-slider" type="range" min="1" value="1">
         <pre id="resume-context" class="code-context"></pre>
-        <label class="field inline">Attente broche <input id="resume-spinup" type="number" min="0" value="3"><span class="muted">s</span></label>
+        <label class="field inline">Attente broche <input id="resume-spinup" type="number" min="0" value="3"><span class="muted">s</span> <button type="button" class="ibtn" data-info="spinup" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
         <pre id="resume-preamble" class="code-context muted"></pre>
         <button id="btn-resume-run" class="primary block">Reprendre à cette ligne</button>
       </div>
@@ -178,7 +214,7 @@
           <button data-corner="FL" class="active">↙ Av. gauche</button><button data-corner="FR">↘ Av. droit</button>
         </div>
         <div class="grid2" id="probe-fields"></div>
-        <label class="check"><input type="checkbox" id="probe-confirm"> La sonde est branchée et testée (pince sur l'outil)</label>
+        <label class="check"><input type="checkbox" id="probe-confirm"> La sonde est branchée et testée (pince sur l'outil) <button type="button" class="ibtn" data-info="probe" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
         <button id="btn-probe" class="primary block">Lancer le palpage</button>
         <div id="probe-result" class="probe-result" hidden></div>
       </div>
@@ -187,17 +223,17 @@
         <p class="muted small">Amenez l'outil sur un point puis capturez-le, tracez deux clics dans la vue 3D, ou tapez les valeurs (repère travail). Les formes sont mémorisées en coordonnées machine : elles restent en place si vous changez le zéro.</p>
 
         <section class="zone-card" data-target="table">
-          <div class="section-title">Plateau <span class="muted small" data-size></span></div>
+          <div class="section-title"><span>Plateau · course machine <button type="button" class="ibtn" data-info="table" aria-label="Plus d'informations" aria-expanded="false">i</button></span><span class="muted small" data-size></span></div>
+          <div class="zone-form" data-dims></div>
           <div class="zone-form" data-form></div>
           <div class="row gap wrap">
             <button class="ghost small" data-draw>Tracer sur la vue</button>
-            <button class="ghost small" data-from-grbl title="Volume machine Grbl après prise d'origine">Depuis $130 / $131</button>
             <button class="ghost small" data-clear>Effacer</button>
           </div>
         </section>
 
         <section class="zone-card" data-target="zone">
-          <div class="section-title">Zone de travail <span class="muted small" data-size></span></div>
+          <div class="section-title"><span>Zone de travail <button type="button" class="ibtn" data-info="zone" aria-label="Plus d'informations" aria-expanded="false">i</button></span><span class="muted small" data-size></span></div>
           <div class="seg" data-kind-seg>
             <button data-kind="rect">Rectangle (2 coins)</button>
             <button data-kind="circle">Cercle (centre + bord)</button>
@@ -212,14 +248,15 @@
         </section>
 
         <section class="zone-card">
-          <div class="section-title">Programme</div>
+          <div class="section-title"><span>Programme <button type="button" class="ibtn" data-info="fit" aria-label="Plus d'informations" aria-expanded="false">i</button></span></div>
           <div id="fit-status" class="fit-status muted">Aucun programme chargé</div>
           <button id="btn-outline-job" class="ghost block">Parcourir le cadre du programme</button>
         </section>
-        <label class="field inline">Hauteur de survol <input id="zone-safe-z" type="number" step="any" value="5"><span class="muted">mm (Z travail)</span></label>
+        <label class="field inline">Hauteur de survol <input id="zone-safe-z" type="number" step="any" value="5"><span class="muted">mm (Z travail)</span> <button type="button" class="ibtn" data-info="safeZ" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
       </div>
 
       <div class="tab" data-pane="macros" hidden>
+        <div class="section-title"><span>Macros <button type="button" class="ibtn" data-info="macros" aria-label="Plus d'informations" aria-expanded="false">i</button></span></div>
         <div id="macro-list" class="macro-list"></div>
         <details class="macro-edit">
           <summary>Nouvelle macro / modifier</summary>
@@ -230,7 +267,7 @@
       </div>
 
       <div class="tab" data-pane="settings" hidden>
-        <input id="settings-filter" placeholder="Filtrer les réglages…">
+        <div class="row gap"><input id="settings-filter" class="grow" placeholder="Filtrer les réglages…"><button type="button" class="ibtn" data-info="settings" aria-label="Plus d'informations" aria-expanded="false">i</button></div>
         <div id="settings-list" class="settings-list"><p class="muted">Connectez une machine pour lire ses réglages ($$).</p></div>
       </div>
     </section>

@@ -1,4 +1,7 @@
 import { Viewer, outline } from './viewer.js';
+import { startTour } from './tour.js';
+import { Preview } from './preview.js';
+import { ibtn, initInfo } from './info.js';
 import { splitProgram, analyze, buildResume } from './shared/gcode.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -218,7 +221,7 @@ function renderMachine() {
   if (alarm) bar.textContent = `${bar.dataset.text || 'Machine en alarme'}. Faites l'origine ($H) ou déverrouillez ($X) si la position est sûre.`;
 
   viewer.setTool(s.wpos);
-  const wcoKey = `${s.wco?.X},${s.wco?.Y}`;
+  const wcoKey = `${s.wco?.X},${s.wco?.Y},${s.wco?.Z}`;
   if (wcoKey !== lastWcoKey) { lastWcoKey = wcoKey; renderZones(); }
   updateEnabled();
 }
@@ -246,6 +249,8 @@ function updateEnabled() {
   pauseBtn.textContent = j?.state === 'paused' || (j?.state === 'running' && machineHeld) ? 'Reprendre' : 'Pause';
   $('#btn-stop').disabled = !jobActive || j.state === 'stopping';
   $('#btn-probe').disabled = !idle || (jobActive && j.state !== 'toolchange');
+  $('#btn-place').disabled = !canRun && !$('#btn-place').classList.contains('active');
+  $('#btn-preview').disabled = !S.lines.length || (jobActive && !preview?.active);
   const zoneOutline = $('.zone-card[data-target="zone"] [data-outline]');
   if (zoneOutline) {
     zoneOutline.disabled = !S.zones.zone || !canJog;
@@ -335,7 +340,12 @@ function jogBlockedReason() {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { act('jogStop').catch(() => {}); closeGoto(); stopDraw(); return; }
+  if (e.key === 'Escape') { act('jogStop').catch(() => {}); closeGoto(); stopDraw(); stopPlace(); return; }
+  if (e.key === ' ' && preview.active && !typing(e) && e.target.tagName !== 'BUTTON') {
+    e.preventDefault();
+    preview.playing ? preview.pause() : preview.play();
+    return;
+  }
   if (!KEYS[e.key] || typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
   e.preventDefault();
   if (e.target.tagName === 'SELECT') e.target.blur();
@@ -371,6 +381,7 @@ function onJobText(name, text) {
   $('#job-meta').textContent = [`${i.lines} lignes`, `≈ ${fmtDuration(i.seconds)}`, dims,
     i.toolChanges ? `${i.toolChanges} changement(s) d'outil` : ''].filter(Boolean).join(' · ');
   if (Number.isFinite(i.min.Z) && i.min.Z >= 0) toast('Attention : aucune passe sous Z0. Le zéro Z est-il au bon endroit ?', 'err');
+  closePreview();
   setupResume();
   renderZones();
   const fit = fitCheck();
@@ -397,6 +408,7 @@ const JOB_STATE = {
 
 function renderJob() {
   const j = S.job;
+  if (j && ['running', 'finishing'].includes(j.state)) closePreview();
   const bar = $('#job-progress');
   if (!j) { bar.style.width = '0'; updateEnabled(); return; }
   const pct = j.total ? (j.acked / j.total) * 100 : 0;
@@ -619,7 +631,7 @@ function renderProbe() {
   $$('#probe-corners button').forEach((b) => b.classList.toggle('active', b.dataset.corner === probeCorner));
   const vals = probeValues(probeKind);
   $('#probe-fields').innerHTML = PROBE_FIELDS[probeKind].map(([k, label]) =>
-    `<label class="field">${label}<input type="number" step="any" data-pk="${k}" value="${vals[k]}"></label>`).join('');
+    `<label class="field"><span>${label} ${ibtn(`pf-${k}`)}</span><input type="number" step="any" data-pk="${k}" value="${vals[k]}"></label>`).join('');
 }
 $('#probe-kind').onclick = (e) => { const b = e.target.closest('[data-kind]'); if (b) { probeKind = b.dataset.kind; renderProbe(); } };
 $('#probe-corners').onclick = (e) => { const b = e.target.closest('[data-corner]'); if (b) { probeCorner = b.dataset.corner; store.set('probeCorner', probeCorner); renderProbe(); } };
@@ -663,7 +675,15 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 
 function shapeToWork(sh) {
   if (!sh) return null;
-  return sh.kind === 'circle' ? { kind: 'circle', c: toWork(sh.c), r: sh.r } : { kind: 'rect', a: toWork(sh.a), b: toWork(sh.b) };
+  if (sh.kind === 'circle') return { kind: 'circle', c: toWork(sh.c), r: sh.r };
+  const out = { kind: 'rect', a: toWork(sh.a), b: toWork(sh.b) };
+  // Course Z du plateau : volume machine de -z à 0, ramené en Z travail.
+  if (sh.z) {
+    const wz = S.machine.status.wco?.Z || 0;
+    out.zTop = -wz;
+    out.zBottom = -sh.z - wz;
+  }
+  return out;
 }
 
 function insideShape(sh, p, tol = 0.001) {
@@ -675,7 +695,7 @@ function insideShape(sh, p, tol = 0.001) {
 function shapeSize(sh) {
   if (!sh) return 'non défini';
   if (sh.kind === 'circle') return `Ø ${fmtNum(sh.r * 2)} mm`;
-  return `${fmtNum(Math.abs(sh.b.X - sh.a.X))} × ${fmtNum(Math.abs(sh.b.Y - sh.a.Y))} mm`;
+  return `${fmtNum(Math.abs(sh.b.X - sh.a.X))} × ${fmtNum(Math.abs(sh.b.Y - sh.a.Y))}${sh.z ? ` × ${fmtNum(sh.z)}` : ''} mm`;
 }
 
 // Brouillons en cours de saisie (coordonnées machine), un par carte.
@@ -692,10 +712,12 @@ resetDrafts();
 function complete(d) {
   if (d.kind === 'circle') return d.c && d.r > 0 ? { kind: 'circle', c: d.c, r: r3(d.r) } : null;
   if (!d.a || !d.b || Math.abs(d.a.X - d.b.X) < 0.1 || Math.abs(d.a.Y - d.b.Y) < 0.1) return null;
-  return { kind: 'rect', a: d.a, b: d.b };
+  return { kind: 'rect', a: d.a, b: d.b, ...(d.z > 0 ? { z: r3(d.z) } : {}) };
 }
 
 function saveShape(target, shape) {
+  // Redessiner le plateau à la souris ne doit pas perdre sa course Z.
+  if (target === 'table' && shape && !shape.z && S.zones.table?.z) shape = { ...shape, z: S.zones.table.z };
   const zones = { ...S.zones, [target]: shape };
   return act('setConfig', { key: 'zones', value: zones })
     .then(() => toast(shape ? `${target === 'table' ? 'Plateau' : 'Zone de travail'} : ${shapeSize(shape)}` : 'Forme effacée', 'ok'))
@@ -734,18 +756,87 @@ function renderZoneCard(target) {
         <span></span>
         <button class="ghost small" data-cap="edge" title="Rayon = distance entre le centre et la position actuelle">Point du bord</button></div>`
     : pointRow('Coin 1', 'a', d.a, 'Capturer') + pointRow('Coin 2', 'b', d.b, 'Capturer');
+  if (target === 'table') renderTableDims(card, saved);
 }
 
-function fitCheck() {
+// Course machine (taille de travail max) : X × Y × Z, saisie ou lue dans la
+// carte ($130 / $131 / $132), avec écriture possible dans Grbl.
+function renderTableDims(card, saved) {
+  const box = card.querySelector('[data-dims]');
+  if (box.contains(document.activeElement)) return;
+  const set = S.settings;
+  const val = (fromShape, key) => (fromShape !== undefined ? r3(fromShape) : set[key] ? r3(Number(set[key])) : '');
+  const w = val(saved && Math.abs(saved.b.X - saved.a.X), 130);
+  const h = val(saved && Math.abs(saved.b.Y - saved.a.Y), 131);
+  const z = val(saved ? saved.z || undefined : undefined, 132);
+  const field = (k, v, ph) => `<input type="number" step="any" min="1" data-dim="${k}" placeholder="${ph}" value="${v}" class="${v !== '' ? '' : 'empty'}" title="Course ${k} (mm)">`;
+  const anchor = store.get('tableAnchor', 'machine');
+  box.innerHTML = `
+    <div class="zone-dims-row"><span>Course</span>${field('X', w, 'X')}${field('Y', h, 'Y')}${field('Z', z, 'Z')}</div>
+    <div class="zone-dims-anchor"><span>Ancrage ${ibtn('anchor')}</span>
+      <select data-anchor>
+        <option value="machine"${anchor === 'machine' ? ' selected' : ''}>Origine machine (Grbl, vers X− Y−)</option>
+        <option value="coin1"${anchor === 'coin1' ? ' selected' : ''}>Coin 1 fixe</option>
+        <option value="tool"${anchor === 'tool' ? ' selected' : ''}>Outil = coin avant gauche</option>
+      </select></div>
+    <label class="check small"><input type="checkbox" data-write-grbl ${S.machine.ready ? 'checked' : 'disabled'}> Écrire aussi dans la carte ($130 / $131 / $132) ${ibtn('writeGrbl')}</label>
+    <div class="row gap"><button class="primary small grow" data-dims-apply>Appliquer</button><button class="ghost small" data-from-grbl title="Lire la course enregistrée dans la carte">Lire la carte</button></div>`;
+}
+
+async function applyTableDims(card) {
+  const W = Number(card.querySelector('[data-dim="X"]').value);
+  const D = Number(card.querySelector('[data-dim="Y"]').value);
+  const zIn = card.querySelector('[data-dim="Z"]').value;
+  const Z = zIn === '' ? 0 : Number(zIn);
+  if (!(W >= 1) || !(D >= 1)) return toast('Indiquez une course X et Y d\'au moins 1 mm', 'err');
+  if (zIn !== '' && !(Z >= 1)) return toast('Course Z invalide', 'err');
+  const anchor = card.querySelector('[data-anchor]').value;
+  store.set('tableAnchor', anchor);
+  let a, b;
+  if (anchor === 'machine') {
+    a = { X: 0, Y: 0 };
+    b = { X: -W, Y: -D };
+  } else if (anchor === 'tool') {
+    if (!S.machine.ready) return toast('Connectez la machine pour utiliser la position de l\'outil', 'err');
+    const m = S.machine.status.mpos;
+    a = { X: r3(m.X), Y: r3(m.Y) };
+    b = { X: r3(m.X + W), Y: r3(m.Y + D) };
+  } else {
+    // Coin 1 fixe, on garde le sens actuel du rectangle.
+    const cur = drafts.table;
+    if (!cur.a) return toast('Capturez ou saisissez d\'abord le coin 1', 'err');
+    const sx = cur.b && cur.b.X < cur.a.X ? -1 : 1, sy = cur.b && cur.b.Y < cur.a.Y ? -1 : 1;
+    a = cur.a;
+    b = { X: r3(a.X + sx * W), Y: r3(a.Y + sy * D) };
+  }
+  const write = card.querySelector('[data-write-grbl]')?.checked;
+  if (write) {
+    const st = S.machine.status.state;
+    if (!S.machine.ready || !['Idle', 'Alarm'].includes(st)) return toast('La carte accepte les réglages seulement à l\'arrêt (Prêt ou Alarme)', 'err');
+    const lines = [`$130=${r3(W)}`, `$131=${r3(D)}`, ...(Z ? [`$132=${r3(Z)}`] : [])];
+    if (!confirm(`Écrire la course dans la carte ?\n\n${lines.join('\n')}\n\nGrbl s'en sert pour les limites logicielles et la prise d'origine.`)) return;
+    await act('cmd', { line: [...lines, '$$'].join('\n') }).catch(() => {});
+  }
+  drafts.table = { kind: 'rect', a, b, ...(Z ? { z: Z } : {}) };
+  document.activeElement?.blur();
+  commitDraft('table');
+}
+
+// offset : décalage du programme à tester (mode « Placer »), repère travail.
+function fitCheck(offset = { X: 0, Y: 0 }) {
   const i = S.info;
   if (!i || !Number.isFinite(i.min.X)) return null;
   const corners = [
     { X: i.min.X, Y: i.min.Y }, { X: i.max.X, Y: i.min.Y }, { X: i.max.X, Y: i.max.Y }, { X: i.min.X, Y: i.max.Y },
-  ];
+  ].map((p) => ({ X: p.X + offset.X, Y: p.Y + offset.Y }));
   const zone = shapeToWork(S.zones.zone);
   const table = shapeToWork(S.zones.table);
   const size = `${fmtNum(i.max.X - i.min.X)} × ${fmtNum(i.max.Y - i.min.Y)} mm`;
   if (table && !corners.every((p) => insideShape(table, p))) return { ok: false, text: `Le programme (${size}) dépasse du plateau avec le zéro actuel.` };
+  if (table?.zBottom !== undefined && Number.isFinite(i.min.Z)) {
+    if (i.min.Z < table.zBottom - 0.001) return { ok: false, text: `Le programme descend à Z ${fmtNum(i.min.Z)}, sous la course Z de la machine (Z ${fmtNum(table.zBottom)} au plus bas avec le zéro actuel).` };
+    if (i.max.Z > table.zTop + 0.001) return { ok: false, text: `Le programme monte à Z ${fmtNum(i.max.Z)}, au-dessus de la course Z de la machine (Z ${fmtNum(table.zTop)} au plus haut avec le zéro actuel).` };
+  }
   if (zone && !corners.every((p) => insideShape(zone, p))) return { ok: false, text: `Le programme (${size}) sort de la zone de travail avec le zéro actuel.` };
   if (!zone && !table) return { ok: true, text: `Programme : ${size}. Définissez une zone pour vérifier qu'il tient.` };
   return { ok: true, text: `Le programme (${size}) tient dans la ${zone ? 'zone de travail' : 'surface du plateau'}.` };
@@ -838,10 +929,10 @@ for (const card of $$('.zone-card[data-target]')) {
       drafts[target] = { kind: drafts[target].kind };
       saveShape(target, null);
     } else if ('fromGrbl' in b.dataset) {
-      const w = Number(S.settings[130]), h = Number(S.settings[131]);
+      const w = Number(S.settings[130]), h = Number(S.settings[131]), z = Number(S.settings[132]);
       if (!w || !h) return toast('Réglages $130 / $131 indisponibles : connectez la machine', 'err');
-      toast('Valable si la prise d\'origine a été faite', 'info');
-      drafts.table = { kind: 'rect', a: { X: 0, Y: 0 }, b: { X: -w, Y: -h } };
+      toast('Course lue dans la carte (volume valable après la prise d\'origine)', 'info');
+      drafts.table = { kind: 'rect', a: { X: 0, Y: 0 }, b: { X: -w, Y: -h }, ...(z ? { z } : {}) };
       commitDraft('table');
     } else if ('fromJob' in b.dataset) {
       const i = S.info;
@@ -849,6 +940,8 @@ for (const card of $$('.zone-card[data-target]')) {
       zoneKind = 'rect';
       drafts.zone = { kind: 'rect', a: toMachine({ X: i.min.X, Y: i.min.Y }), b: toMachine({ X: i.max.X, Y: i.max.Y }) };
       commitDraft('zone');
+    } else if ('dimsApply' in b.dataset) {
+      applyTableDims(card);
     } else if ('outline' in b.dataset) {
       const z = shapeToWork(S.zones.zone);
       const pts = outline(z, 48);
@@ -870,7 +963,11 @@ for (const card of $$('.zone-card[data-target]')) {
     input.blur();
     commitDraft(target);
   });
-  card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.target.blur(); });
+  card.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+    if (e.target.dataset.dim) { e.preventDefault(); applyTableDims(card); return; }
+    e.target.blur();
+  });
 }
 
 function runPath(points) {
@@ -887,6 +984,272 @@ $('#btn-outline-job').onclick = () => {
 };
 $('#zone-safe-z').value = store.get('safeZ', 5);
 $('#zone-safe-z').onchange = () => store.set('safeZ', safeZ());
+
+
+
+// ---- Simulation avant usinage --------------------------------------------------
+
+const preview = new Preview(viewer, { onFrame: renderPlaybar });
+let scrubbing = false;
+
+function renderPlaybar(st) {
+  $('#pb-play').textContent = st.playing ? '⏸' : '▶';
+  if (!scrubbing) $('#pb-scrub').value = st.total ? Math.round((st.t / st.total) * 1000) : 0;
+  $('#pb-time').textContent = `${fmtClock(st.t)} / ${fmtClock(st.total)}`;
+  $('#pb-line').textContent = S.lines.length ? `L${st.line + 1}  ${S.lines[st.line]}` : '';
+}
+const fmtClock = (sec) => {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const mm = String(m).padStart(h ? 2 : 1, '0'), ss = String(s).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+};
+
+function openPreview() {
+  if (!S.lines.length) return toast('Chargez d\'abord un programme', 'err');
+  const jobActive = ['running', 'paused', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
+  if (jobActive) return toast('Simulation indisponible pendant un usinage', 'err');
+  closeGoto();
+  stopDraw();
+  stopPlace();
+  try {
+    preview.open({ rapidRate: Number(S.settings[110]) || 3000, toolDia: Number($('#pb-tool').value) || 6 });
+  } catch (e) { return toast(e.message, 'err'); }
+  preview.speed = Number($('#pb-speed').value);
+  preview.setShowStock($('#pb-stock').checked);
+  $('#playbar').hidden = false;
+  $('#btn-preview').classList.add('active');
+  $('#btn-preview').textContent = '■ Simulation';
+  if (!preview.cutBounds) toast('Aucune passe sous Z0 : pas de matière à creuser', 'info');
+  viewer.view('iso', { programOnly: true });
+  preview.play();
+}
+function closePreview() {
+  if (!preview.active) return;
+  preview.close();
+  $('#playbar').hidden = true;
+  $('#btn-preview').classList.remove('active');
+  $('#btn-preview').textContent = '▶ Simuler';
+  renderJob();
+}
+$('#btn-preview').onclick = () => (preview.active ? closePreview() : openPreview());
+$('#pb-close').onclick = closePreview;
+$('#pb-play').onclick = () => (preview.playing ? preview.pause() : preview.play());
+$('#pb-restart').onclick = () => preview.seek(0);
+$('#pb-scrub').addEventListener('pointerdown', () => { scrubbing = true; });
+$('#pb-scrub').addEventListener('input', (e) => preview.seekFraction(Number(e.target.value) / 1000));
+$('#pb-scrub').addEventListener('change', () => { scrubbing = false; });
+$('#pb-speed').value = String(store.get('pbSpeed', 5));
+$('#pb-speed').onchange = (e) => { preview.speed = Number(e.target.value); store.set('pbSpeed', preview.speed); };
+$('#pb-tool').value = store.get('pbTool', store.get('probe.corner', {}).toolDia ?? 6);
+$('#pb-tool').onchange = (e) => {
+  const d = Number(e.target.value);
+  if (!(d > 0)) return;
+  store.set('pbTool', d);
+  preview.setToolDia(d);
+};
+$('#pb-stock').onchange = (e) => preview.setShowStock(e.target.checked);
+
+// ---- Placer le programme sur le plateau ------------------------------------
+// On glisse le parcours ; à la validation, l'origine X/Y est décalée d'autant
+// (G10 L20 sur la position actuelle). Le fichier G-code ne change pas.
+
+let placeDelta = null;
+function canPlace() {
+  const j = S.job;
+  const jobActive = ['running', 'paused', 'finishing', 'stopping', 'toolchange'].includes(j?.state);
+  return S.machine.ready && S.machine.status.state === 'Idle' && !jobActive;
+}
+function startPlace() {
+  if (!S.lines.length) return toast('Chargez d\'abord un programme', 'err');
+  if (!canPlace()) return toast('La machine doit être Prêt, sans usinage en cours', 'err');
+  closePreview();
+  closeGoto();
+  stopDraw();
+  placeDelta = null;
+  $('#btn-place').classList.add('active');
+  const hint = $('#viewer-hint');
+  hint.classList.add('drawing');
+  hint.textContent = 'Glissez le parcours pour le placer · clic droit = déplacer la vue · Échap pour annuler';
+  if (S.zones.table || S.zones.zone) viewer.view('top');
+  viewer.setPlaceMode({
+    onMove: (d) => { placeDelta = d; showPlacePop(false); },
+    onDrop: (d) => { placeDelta = d; showPlacePop(true); },
+  });
+}
+function showPlacePop(final) {
+  const d = placeDelta;
+  $('#viewer-hint').textContent = `Décalage X ${fmtSigned(d.X)}  Y ${fmtSigned(d.Y)} mm`;
+  const pop = $('#place-pop');
+  pop.hidden = !final;
+  if (!final) return;
+  $('#place-delta').innerHTML = `<b>ΔX</b> ${fmtSigned(d.X)} &nbsp; <b>ΔY</b> ${fmtSigned(d.Y)} mm`;
+  const fit = fitCheck(d);
+  const el = $('#place-fit');
+  el.textContent = fit ? fit.text.replace('avec le zéro actuel', 'à cette position') : '';
+  el.className = `small ${fit ? (fit.ok ? 'fit-status ok' : 'fit-status bad') : ''}`;
+  pop.style.left = '50%';
+  pop.style.top = '64px';
+  pop.style.transform = 'translateX(-50%)';
+}
+function stopPlace() {
+  if (!$('#btn-place').classList.contains('active')) return;
+  $('#btn-place').classList.remove('active');
+  $('#place-pop').hidden = true;
+  placeDelta = null;
+  viewer.setPlaceMode(null);
+  setHint();
+}
+const fmtSigned = (v) => `${v >= 0 ? '+' : ''}${(Math.round(v * 10) / 10).toFixed(1)}`;
+$('#btn-place').onclick = () => ($('#btn-place').classList.contains('active') ? stopPlace() : startPlace());
+$('#place-cancel').onclick = stopPlace;
+$('#place-apply').onclick = async () => {
+  const d = placeDelta;
+  if (!d || !canPlace()) return toast('La machine doit être Prêt', 'err');
+  const fit = fitCheck(d);
+  if (fit && !fit.ok && !confirm(`${fit.text.replace('avec le zéro actuel', 'à cette position')}\n\nPlacer quand même ?`)) return;
+  // Le zéro se déplace de +d : la position actuelle vaut alors (travail - d).
+  const w = S.machine.status.wpos;
+  const x = Math.round((w.X - d.X) * 1000) / 1000, y = Math.round((w.Y - d.Y) * 1000) / 1000;
+  await act('cmd', { line: `G10L20P0X${x}Y${y}` }).then(() => {
+    toast(`Programme déplacé de X ${fmtSigned(d.X)} Y ${fmtSigned(d.Y)} mm (origine décalée)`, 'ok');
+  }).catch(() => {});
+  stopPlace();
+};
+
+// ---- Démo guidée -------------------------------------------------------------
+
+const TOUR = [
+  {
+    title: 'Bienvenue dans Copeau',
+    body: `<p>Copeau pilote une CNC <b>Grbl / grblHAL</b> depuis le navigateur.</p>
+      <p>Cette démo présente l'écran en 13 étapes. Utilisez <kbd>→</kbd> / <kbd>←</kbd> ou les boutons. À la fin, vous pourrez tout essayer sur une <b>machine simulée</b>, sans risque.</p>
+      <p class="muted">Gardez toujours l'arrêt d'urgence de la vraie machine à portée de main.</p>`,
+  },
+  {
+    target: '.connect', title: 'Connexion',
+    body: `<p>Choisissez le port USB de la carte (ou <b>Simulateur Grbl</b>), laissez <b>115200</b>, puis <b>Connecter</b>.</p>
+      <p><b>↻</b> rafraîchit la liste si vous venez de brancher la machine.</p>`,
+  },
+  {
+    target: '.machine-state', title: 'État de la machine',
+    body: `<p>Le badge indique l'état : <b>Prêt</b>, <b>Usinage</b>, <b>Pause</b> ou <b>Alarme</b>.</p>
+      <ul><li><b>Origine</b> : prise d'origine sur les fins de course (à faire au démarrage).</li>
+      <li><b>Déverrouiller</b> : lève une alarme si la position est sûre.</li>
+      <li><b>Reset</b> : réinitialise la carte (ce n'est pas un arrêt d'urgence).</li></ul>`,
+  },
+  {
+    target: '.dro', title: 'Position et zéro',
+    body: `<p>Les grands chiffres sont la <b>position travail</b>, la petite ligne <b>M</b> la position machine.</p>
+      <p><b>X = 0</b>, <b>Y = 0</b>, <b>Z = 0</b> posent l'origine de la pièce là où est l'outil. <b>Cliquez sur un chiffre</b> pour taper une valeur précise (ex. épaisseur d'une cale).</p>`,
+  },
+  {
+    target: '.jog', title: 'Déplacer la tête',
+    body: `<p><b>Appui court</b> = un pas de la taille choisie, <b>appui maintenu</b> = mouvement continu jusqu'au relâchement.</p>
+      <p>Au clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> pour X/Y, <kbd>PgUp</kbd><kbd>PgDn</kbd> pour Z, <kbd>Échap</kbd> pour arrêter.</p>`,
+  },
+  {
+    target: '.viewer-wrap', title: 'Vue 3D et suivi en temps réel',
+    body: `<p>Le parcours d'outil s'affiche en <b>bleu</b> (usinage) et <b>gris</b> (rapides). Le cône jaune est l'outil, mis à jour 5 fois par seconde.</p>
+      <p>Pendant l'usinage, la partie faite passe en <b>orange</b> en direct.</p>
+      <p>Glisser = tourner, molette = zoom. <b>Cliquez sur le plateau</b> pour y amener la tête.</p>`,
+  },
+  {
+    target: '#btn-place', title: 'Placer le programme',
+    body: `<p><b>Placer</b> permet de glisser le parcours sur le plateau. Copeau indique si la nouvelle position tient dans la zone, puis décale l'origine X/Y d'autant.</p>`,
+  },
+  {
+    target: '#btn-preview', title: 'Simuler avant de lancer',
+    body: `<p><b>▶ Simuler</b> joue l'usinage dans la vue : un outil vert suit le parcours à la vitesse du programme et <b>creuse la matière</b> au fur et à mesure.</p>
+      <p>Barre de lecture : ▶ / ⏸ (ou <kbd>Espace</kbd>), curseur pour aller à n'importe quel moment, vitesse 1× à 100×, diamètre de fraise. Rien n'est envoyé à la machine.</p>`,
+  },
+  {
+    target: '.job-bar', title: 'Programme',
+    body: `<p><b>Ouvrir</b> ou glissez un fichier G-code sur la vue. Vous voyez la durée estimée et les dimensions.</p>
+      <p><b>Démarrer</b>, <b>Pause</b> / <b>Reprendre</b>, <b>Arrêter</b> (arrêt propre, la position est conservée). La barre montre la progression et le temps restant.</p>`,
+  },
+  {
+    target: '.overrides', title: 'Corrections en direct',
+    body: `<p>Accélérez ou ralentissez l'<b>avance</b>, la <b>broche</b> et les <b>rapides</b> pendant l'usinage, sans toucher au fichier.</p>`,
+  },
+  {
+    target: '.panel.right', title: 'Palpage', before: () => showTab('probe'),
+    body: `<p>Avec une sonde (pince sur l'outil + plaque), Copeau trouve l'origine tout seul : <b>Z</b> sur le dessus, un <b>coin XYZ</b>, ou le <b>centre d'un trou</b>.</p>`,
+  },
+  {
+    target: '.panel.right', title: 'Plateau et zone de travail', before: () => showTab('zones'),
+    body: `<p>Définissez le <b>plateau</b> et la <b>zone de travail</b> (rectangle par 2 coins, ou cercle) : en capturant la position de l'outil, en traçant sur la vue, ou en tapant les valeurs.</p>
+      <p>Copeau vérifie que le programme tient dedans et peut <b>parcourir le contour</b>.</p>`,
+  },
+  {
+    target: '.panel.right', title: 'Reprise, console, macros', before: () => showTab('resume'),
+    body: `<p><b>Reprise</b> : relance un usinage interrompu à une ligne choisie (ou en cliquant sur le parcours).</p>
+      <p><b>Console</b> pour les commandes, <b>Macros</b> pour vos séquences favorites, <b>Réglages</b> pour les paramètres $ de la carte.</p>`,
+  },
+  {
+    target: '.help', title: 'À vous de jouer', before: () => showTab('console'),
+    body: `<p>Le bouton <b>?</b> relance cette démo, <b>Manuel</b> ouvre le mode d'emploi complet.</p>
+      <p>Pour essayer maintenant : Copeau connecte la machine simulée, fait l'origine, pose le zéro sur une pièce virtuelle et charge un programme de démonstration.</p>`,
+    actions: [{ label: 'Essayer avec le simulateur', primary: true, run: () => tryDemo() }],
+  },
+];
+
+function runTour(start = 0) {
+  closeGoto();
+  stopDraw();
+  stopPlace();
+  startTour(TOUR, { start, onClose: () => store.set('tourDone', true) });
+}
+$('#btn-tour').onclick = () => runTour();
+
+async function waitUntil(fn, ms = 15000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (fn()) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('La machine simulée ne répond pas');
+}
+
+// Installe une séance d'essai sur le simulateur. Ne touche jamais une vraie machine.
+async function tryDemo() {
+  try {
+    const m = S.machine;
+    if (m.connected && m.port !== 'simulateur') {
+      return toast('Une vraie machine est connectée : déconnectez-la pour essayer le simulateur.', 'err');
+    }
+    if (['running', 'paused', 'toolchange', 'finishing'].includes(S.job?.state)) return toast('Un usinage est en cours', 'err');
+    toast('Préparation de la démo…');
+    if (!m.connected) {
+      $('#port').value = 'simulateur';
+      await request('connect', { port: 'simulateur' });
+    }
+    await waitUntil(() => S.machine.ready);
+    if (S.machine.status.state === 'Alarm') {
+      await request('cmd', { line: '$H' });
+      await waitUntil(() => S.machine.status.state === 'Idle', 30000);
+    }
+    // Zéro sur le coin avant gauche de la pièce virtuelle, dessus à Z −50 machine,
+    // avec 10 mm de marge.
+    await request('cmd', { line: 'G10L2P1X-210Y-190Z-50\nG90G0Z5\n$#\n$G' });
+    const text = await fetch('/demo/copeau-demo.nc').then((r) => r.text());
+    await request('load', { name: 'copeau-demo.nc', text });
+    if (!S.zones.zone && !S.zones.table) {
+      await request('setConfig', { key: 'zones', value: {
+        table: { kind: 'rect', a: { X: -1, Y: -1 }, b: { X: -300, Y: -300 } },
+        zone: { kind: 'rect', a: { X: -220, Y: -200 }, b: { X: -120, Y: -100 } },
+      } });
+    }
+    showTab('zones');
+    toast('Démo prête : cliquez sur Démarrer pour lancer l\'usinage simulé', 'ok');
+    const run = $('#btn-run');
+    run.classList.remove('pulse');
+    void run.offsetWidth;
+    run.classList.add('pulse');
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
 
 // ---- Macros ----------------------------------------------------------------
 
@@ -971,6 +1334,75 @@ $('#settings-list').addEventListener('change', async (e) => {
   input.blur();
 });
 
+
+// ---- Bulles d'aide « i » -------------------------------------------------------
+
+const INFO = {
+  connect: { title: 'Connexion', html: `<p><b>Port</b> : la carte apparaît comme <code>/dev/cu.usbserial…</code> ou <code>/dev/cu.usbmodem…</code> sur Mac, <code>COM3</code>… sur Windows. <b>Simulateur</b> = machine virtuelle, sans risque.</p>
+    <p><b>Vitesse</b> : 115200 pour Grbl standard. Si rien ne répond, essayez 250000.</p>
+    <p>Un seul logiciel peut utiliser le port : fermez UGS, Candle ou CNCjs.</p>` },
+  state: { title: 'Origine, déverrouillage, reset', html: `<p><b>Origine ($H)</b> : la machine va chercher ses fins de course, sa position devient exacte. À faire à chaque mise sous tension.</p>
+    <p><b>Déverrouiller ($X)</b> : lève l'alarme sans bouger. Seulement si vous êtes sûr de la position.</p>
+    <p><b>Reset</b> vide la mémoire de la carte. Ce n'est <b>pas</b> un arrêt d'urgence.</p>` },
+  dro: { title: 'Position travail et machine', html: `<p><b>Grands chiffres</b> : position par rapport au zéro de la pièce (G54). C'est le repère du programme.</p>
+    <p><b>Ligne M</b> : position machine, par rapport aux fins de course. Elle ne change pas quand on refait le zéro.</p>
+    <p><b>X = 0</b> pose le zéro à la position actuelle. <b>Cliquez un chiffre</b> pour taper une valeur, par exemple 20 si l'outil est posé sur une cale de 20 mm. Le zéro reste mémorisé dans la carte.</p>` },
+  jog: { title: 'Déplacer la tête', html: `<p><b>Appui court</b> : un pas de la taille choisie. <b>Appui maintenu</b> : mouvement continu jusqu'au relâchement.</p>
+    <p>Clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> X/Y, <kbd>PgUp</kbd><kbd>PgDn</kbd> Z, <kbd>Échap</kbd> stop.</p>
+    <p>Bloqué en alarme et pendant l'usinage. Si l'écran perd la connexion, le mouvement s'arrête.</p>` },
+  jogFeed: { title: 'Vitesse jog', html: `<p>Vitesse des déplacements manuels, en mm/min. 2000 convient en général ; réduisez près de la pièce.</p><p>Grbl la plafonne à la vitesse max de chaque axe ($110 à $112).</p>` },
+  overrides: { title: 'Corrections en direct', html: `<p>Agissent tout de suite, même pendant l'usinage, <b>sans modifier le fichier</b>.</p>
+    <p><b>Avance</b> et <b>broche</b> : 10 à 200 %. <b>Rapide</b> : 25, 50 ou 100 %.</p>
+    <p>Utile pour ralentir une passe qui vibre. Un reset remet tout à 100 %.</p>` },
+  viewer: { title: 'Vue 3D', html: `<p>Glisser : tourner. Clic droit ou deux doigts : déplacer. Molette ou pincement : zoom.</p>
+    <p><b>Bleu</b> usinage, <b>gris</b> rapides, <b>orange</b> déjà usiné, <b>vert</b> simulé. Cône jaune = outil réel.</p>
+    <p><b>Clic sur le plateau</b> : y amener la tête. <b>Placer</b> : glisser le programme (décale l'origine). <b>Simuler</b> : voir l'usinage avant de lancer.</p>` },
+  gotoLift: { title: 'Monter avant de traverser', html: `<p>Remonte d'abord à la hauteur de survol (onglet Zone), pour ne pas traverser la pièce ou une bride en ligne droite.</p>` },
+  sim: { title: 'Simulation', html: `<p>Tout se passe dans le navigateur : <b>rien n'est envoyé à la machine</b>.</p>
+    <p>Suppose une fraise droite du Ø indiqué et un dessus de pièce à Z0. Les accélérations ne sont pas simulées : la durée réelle sera un peu plus longue.</p>
+    <p><kbd>Espace</kbd> : lecture / pause. Le curseur va en avant comme en arrière.</p>` },
+  job: { title: 'Programme', html: `<p><b>Durée estimée</b> d'après les avances du fichier ; la durée réelle est un peu plus longue.</p>
+    <p><b>Pause</b> : arrêt immédiat du mouvement. <b>Arrêter</b> : ralentit puis vide la carte, la position est conservée.</p>
+    <p>Une erreur de la carte met le job en pause au lieu de continuer.</p>` },
+  console: { title: 'Console', html: `<p>Envoie n'importe quelle commande G-code ou $. <kbd>↑</kbd><kbd>↓</kbd> : historique.</p>
+    <p><code>$$</code> réglages, <code>$G</code> modes actifs, <code>$#</code> origines, <code>$I</code> version.</p><p>Orange = envoyé, bleu = info, rouge = erreur.</p>` },
+  resume: { title: 'Numéro de ligne', html: `<p>Les numéros comptent <b>seulement les lignes envoyées</b> (sans commentaires ni lignes vides) : ils peuvent différer de votre éditeur. Fiez-vous au code affiché.</p>
+    <p>Choisissez une ligne un peu avant l'arrêt. Le préambule rétablit les modes, relance la broche, monte au Z le plus haut déjà utilisé puis replonge lentement.</p>` },
+  spinup: { title: 'Attente broche', html: `<p>Temps laissé à la broche pour atteindre sa vitesse avant de replonger. 3 s pour une petite broche, 5 à 10 s pour une grosse broche avec variateur.</p>` },
+  probe: { title: 'La sonde', html: `<p>Une pince sur l'outil et une plaque (ou la pièce si elle est conductrice) reliée à l'entrée sonde de la carte.</p>
+    <p><b>Testez avant</b> : touchez la plaque avec la pince, puis envoyez <code>?</code> dans la console : l'état doit contenir <code>Pn:P</code>.</p>
+    <p>Sans contact : alarme 5. Déverrouillez, rapprochez l'outil et recommencez.</p>` },
+  'pf-plate': { html: `<p>Épaisseur de la plaque posée sur la pièce. <b>0</b> si l'outil touche directement la pièce.</p>` },
+  'pf-travel': { html: `<p>Distance maximale d'approche. Sans contact sur cette distance : arrêt et alarme 5.</p>` },
+  'pf-fastFeed': { html: `<p>Première approche, rapide. Restez modéré (100 à 200 mm/min) pour ne pas abîmer l'outil ou la plaque.</p>` },
+  'pf-slowFeed': { html: `<p>Seconde approche, lente : c'est elle qui fait la mesure. Plus lent = plus précis.</p>` },
+  'pf-retract': { html: `<p>Remontée de l'outil à la fin du palpage.</p>` },
+  'pf-toolDia': { html: `<p>Diamètre <b>réel</b> de l'outil, mesuré au pied à coulisse : il sert à corriger X et Y du rayon.</p>` },
+  'pf-wall': { html: `<p>Avec une cale d'angle : épaisseur de sa paroi entre l'outil et la pièce. <b>0</b> si l'outil touche directement les flancs.</p>` },
+  'pf-inset': { html: `<p>Distance approximative entre l'outil et chaque bord du coin au départ. L'outil sortira de cette distance + son rayon + 5 mm avant de redescendre.</p>` },
+  'pf-depth': { html: `<p>Profondeur sous le dessus de la pièce à laquelle les flancs X et Y sont palpés.</p>` },
+  'pf-maxRadius': { html: `<p>Rayon maximal attendu du trou : course de palpage dans chaque direction depuis le départ.</p>` },
+  table: { title: 'Plateau · course machine', html: `<p>La <b>taille de travail maximale</b> de la CNC : la course de chaque axe, X × Y × Z.</p>
+    <p>Elle est dessinée en 3D. Copeau vérifie que le programme ne sort pas de cette course (y compris en Z) et refuse un « Aller ici » en dehors.</p>
+    <p>Mémorisée en coordonnées machine : elle ne bouge pas quand vous refaites le zéro.</p>` },
+  anchor: { title: 'Ancrage', html: `<p><b>Origine machine</b> : Grbl standard. Après une prise d'origine, la machine travaille de 0 vers les X, Y et Z négatifs. C'est le bon choix si votre machine a des fins de course.</p>
+    <p><b>Coin 1 fixe</b> : redimensionne le rectangle sans déplacer son coin 1.</p>
+    <p><b>Outil = coin avant gauche</b> : pour une machine sans prise d'origine, amenez l'outil au coin avant gauche puis appliquez.</p>` },
+  writeGrbl: { title: 'Écrire dans la carte', html: `<p>Enregistre la course dans Grbl : <code>$130</code> (X), <code>$131</code> (Y), <code>$132</code> (Z).</p>
+    <p>Grbl s'en sert pour les <b>limites logicielles</b> ($20=1) et la prise d'origine. Une course trop grande peut envoyer la machine en butée : mesurez-la.</p>
+    <p>Copeau demande confirmation avant d'écrire.</p>` },
+  zone: { title: 'Zone de travail', html: `<p>L'emplacement de la <b>pièce</b> sur le plateau : rectangle (2 coins opposés) ou cercle (centre + un point du bord).</p>
+    <p>Copeau vérifie que le programme tient dedans. <b>Parcourir le contour</b> fait le tour à la hauteur de survol : pratique pour vérifier le bridage.</p>` },
+  fit: { title: 'Vérification', html: `<p>Compare le cadre du programme (avec le zéro actuel) au plateau, à la course Z et à la zone de travail.</p>
+    <p>Rouge : le programme dépasse. Copeau demandera confirmation au démarrage.</p>` },
+  safeZ: { title: 'Hauteur de survol', html: `<p>Hauteur (Z travail) à laquelle la tête monte avant « Aller ici » et les parcours de contour. Elle doit dépasser les brides et la pièce.</p>` },
+  macros: { title: 'Macros', html: `<p>Une commande par ligne (G-code ou $), exécutées dans l'ordre comme si vous les tapiez dans la console.</p>
+    <p>Enregistrées sur l'ordinateur qui fait tourner Copeau (<code>data/macros.json</code>).</p>` },
+  settings: { title: 'Réglages de la carte', html: `<p>Paramètres enregistrés dans Grbl. Une mauvaise valeur peut inverser un moteur ou envoyer un axe en butée : <b>notez l'ancienne valeur</b> avant de changer.</p>
+    <p>Copeau demande confirmation à chaque écriture.</p>` },
+};
+initInfo(INFO);
+
 // ---- Utilitaires -------------------------------------------------------------
 
 function fmtDuration(sec) {
@@ -986,3 +1418,6 @@ function escapeHtml(s) {
 
 renderMachine();
 connectWs();
+const tourParam = new URLSearchParams(location.search).get('tour');
+if (tourParam !== null) setTimeout(() => runTour(Math.max(0, Number(tourParam) || 0)), 600);
+else if (!store.get('tourDone', false)) setTimeout(() => runTour(), 600);

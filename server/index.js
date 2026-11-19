@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
+import { marked } from 'marked';
 import { SerialPort } from 'serialport';
 import { GrblController } from './grbl.js';
 import { GrblSimulator } from './simulator.js';
@@ -23,6 +24,29 @@ const THREE_DIR = path.join(root, 'node_modules/three');
 const app = express();
 app.use(express.static(path.join(root, 'public')));
 app.use('/vendor/three', express.static(THREE_DIR));
+
+// Manuel d'utilisation : docs/MANUEL.md rendu en HTML, lisible hors ligne.
+// Les ancres suivent la convention GitHub pour que le sommaire marche partout.
+const slug = (t) => t.toLowerCase().replace(/<[^>]+>/g, '').replace(/[^\p{L}\p{N}\s-]/gu, '').trim().replace(/\s/g, '-');
+marked.use({
+  renderer: {
+    heading({ tokens, depth, text }) {
+      return `<h${depth} id="${slug(text)}">${this.parser.parseInline(tokens)}</h${depth}>\n`;
+    },
+  },
+});
+app.get('/manuel', async (req, res) => {
+  const md = await fs.readFile(path.join(root, 'docs/MANUEL.md'), 'utf8');
+  res.type('html').send(`<!doctype html><html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Manuel Copeau</title>
+<link rel="stylesheet" href="/css/manuel.css"></head><body>
+<nav class="top"><a href="/">← Retour à Copeau</a><a href="/?tour=0">Lancer la démo guidée</a></nav>
+<main>${marked.parse(md)}</main></body></html>`);
+});
+app.use('/vendor/three/examples/jsm', (req, res, next) => {
+  const addonsDir = process.env.COPEAU_THREE_ADDONS_DIR || path.join(THREE_DIR, 'examples/jsm');
+  express.static(addonsDir)(req, res, next);
+});
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 * 1024 });
 
@@ -252,7 +276,7 @@ wss.on('connection', (ws) => {
 });
 
 export function startServer({ port = PORT, host = HOST, threeAddonsDir } = {}) {
-  if (threeAddonsDir) app.use('/vendor/three/examples/jsm', express.static(threeAddonsDir));
+  if (threeAddonsDir) process.env.COPEAU_THREE_ADDONS_DIR = threeAddonsDir;
   return new Promise((resolve, reject) => {
     const onError = (error) => {
       server.off('listening', onListening);

@@ -6,6 +6,8 @@ const COLORS = {
   feed: new THREE.Color(0x5aa9ff),
   rapid: new THREE.Color(0x4a515e),
   feedDone: new THREE.Color(0xf08a24),
+  feedPreview: new THREE.Color(0x3ecf8e),
+  rapidPreview: new THREE.Color(0x2f5d48),
   rapidDone: new THREE.Color(0x6b4a2a),
 };
 
@@ -18,6 +20,11 @@ export class Viewer {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0b0d10);
+    // Éclairage pour la matière simulée (les lignes n'en dépendent pas).
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x30343c, 1.1));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+    sun.position.set(-0.5, -0.8, 1.4);
+    this.scene.add(sun);
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
     this.camera.up.set(0, 0, 1);
     this.camera.position.set(150, -200, 180);
@@ -44,6 +51,12 @@ export class Viewer {
     cone.translate(0, 0, 7);
     this.tool = new THREE.Mesh(cone, new THREE.MeshBasicMaterial({ color: 0xf5c84b, transparent: true, opacity: 0.85 }));
     this.scene.add(this.tool);
+
+    // Outil fantôme de la simulation (l'outil jaune reste la position réelle).
+    this.ghost = new THREE.Mesh(cone.clone(), new THREE.MeshBasicMaterial({ color: 0x3ecf8e, transparent: true, opacity: 0.9 }));
+    this.ghost.visible = false;
+    this.scene.add(this.ghost);
+    this.previewSeg = null;
 
     this.marker = new THREE.Mesh(new THREE.SphereGeometry(1.6, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
     this.marker.visible = false;
@@ -79,9 +92,37 @@ export class Viewer {
     let down = null;
     el.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
     el.addEventListener('pointerup', (e) => {
-      if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+      if (this.placing || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
       this.pick(e);
     });
+
+    // Mode « Placer » : glisser (bouton gauche / un doigt) déplace le parcours.
+    this.placing = null;
+    let drag = null;
+    el.addEventListener('pointerdown', (e) => {
+      if (!this.placing || !this.path || e.button !== 0) return;
+      const p = this.planePoint(e);
+      if (!p) return;
+      drag = { start: p, base: { x: this.path.position.x, y: this.path.position.y } };
+      el.setPointerCapture(e.pointerId);
+      el.classList.add('dragging');
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const p = this.planePoint(e);
+      if (!p) return;
+      const d = { X: drag.base.x + p.X - drag.start.X, Y: drag.base.y + p.Y - drag.start.Y };
+      this.setPathOffset(d);
+      this.placing.onMove?.(d);
+    });
+    const endDrag = () => {
+      if (!drag) return;
+      drag = null;
+      el.classList.remove('dragging');
+      this.placing?.onDrop?.({ X: this.path.position.x, Y: this.path.position.y });
+    };
+    el.addEventListener('pointerup', endDrag);
+    el.addEventListener('pointercancel', endDrag);
     let hoverQueued = false;
     el.addEventListener('pointermove', (e) => {
       if (!this.onHover || hoverQueued) return;
@@ -140,6 +181,7 @@ export class Viewer {
     const pos = [];
     const segLine = [];
     const segRapid = [];
+    const segFeed = [];
     this.lineEnd = new Array(lines.length);
     const st = createState();
     lines.forEach((line, i) => {
@@ -148,6 +190,7 @@ export class Viewer {
           pos.push(a.X, a.Y, a.Z, b.X, b.Y, b.Z);
           segLine.push(i);
           segRapid.push(seg.kind === 'rapid' ? 1 : 0);
+          segFeed.push(seg.feed || 0);
         };
         if (seg.kind === 'arc') {
           let prev = seg.from;
@@ -161,6 +204,9 @@ export class Viewer {
 
     this.segLine = Uint32Array.from(segLine);
     this.segRapid = Uint8Array.from(segRapid);
+    this.segFeed = Float32Array.from(segFeed);
+    this.previewSeg = null;
+    this.ghost.visible = false;
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geom.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(pos.length), 3));
@@ -180,8 +226,14 @@ export class Viewer {
   paint(from, to) {
     const col = this.path.geometry.attributes.color;
     for (let s = from; s < to; s++) {
-      const done = this.segLine[s] < this.done;
-      const c = this.segRapid[s] ? (done ? COLORS.rapidDone : COLORS.rapid) : (done ? COLORS.feedDone : COLORS.feed);
+      let c;
+      if (this.previewSeg !== null) {
+        const done = s < this.previewSeg;
+        c = this.segRapid[s] ? (done ? COLORS.rapidPreview : COLORS.rapid) : (done ? COLORS.feedPreview : COLORS.feed);
+      } else {
+        const done = this.segLine[s] < this.done;
+        c = this.segRapid[s] ? (done ? COLORS.rapidDone : COLORS.rapid) : (done ? COLORS.feedDone : COLORS.feed);
+      }
       col.setXYZ(s * 2, c.r, c.g, c.b);
       col.setXYZ(s * 2 + 1, c.r, c.g, c.b);
     }
@@ -265,11 +317,67 @@ export class Viewer {
       }
     };
     if (table) add(table, { line: 0x6b7280, fill: 0x2a2f38, fillOpacity: 0.35, z: -0.05 });
+    // Volume de travail de la machine (course X × Y × Z) en fil de fer.
+    if (table?.kind === 'rect' && table.zBottom !== undefined) {
+      const minX = Math.min(table.a.X, table.b.X), maxX = Math.max(table.a.X, table.b.X);
+      const minY = Math.min(table.a.Y, table.b.Y), maxY = Math.max(table.a.Y, table.b.Y);
+      const geom = new THREE.BoxGeometry(maxX - minX, maxY - minY, table.zTop - table.zBottom);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.7 }));
+      geom.dispose();
+      edges.position.set((minX + maxX) / 2, (minY + maxY) / 2, (table.zTop + table.zBottom) / 2);
+      this.shapes.add(edges);
+    }
     if (zone) add(zone, { line: 0xf5c84b, fill: 0xf5c84b, fillOpacity: 0.07, z: 0.02 });
     if (preview) add(preview, { line: 0x3ecf8e, z: 0.04, dashed: true });
     const changed = (this.shapesBox ? JSON.stringify(this.shapesBox) : '') !== (box.isEmpty() ? '' : JSON.stringify(box));
     this.shapesBox = box.isEmpty() ? null : box;
     if (changed) this.fitGrid();
+    this.render();
+  }
+
+  // ---- Simulation ----------------------------------------------------------
+
+  // Segments [0, k) affichés comme simulés ; null = retour à l'affichage du job.
+  setPreviewSeg(k) {
+    if (!this.path) return;
+    const n = this.segLine.length;
+    if (k === null || this.previewSeg === null) {
+      this.previewSeg = k;
+      this.paint(0, n);
+    } else if (k !== this.previewSeg) {
+      const lo = Math.min(k, this.previewSeg), hi = Math.max(k, this.previewSeg);
+      this.previewSeg = k;
+      this.paint(lo, Math.min(hi + 1, n));
+    }
+    this.render();
+  }
+
+  // Coordonnées du segment s : [ax, ay, az, bx, by, bz].
+  segment(s) {
+    const a = this.path.geometry.attributes.position.array;
+    return a.subarray(s * 6, s * 6 + 6);
+  }
+
+  setGhost(p) {
+    this.ghost.visible = !!p;
+    if (p) {
+      this.ghost.position.set(p.X, p.Y, p.Z);
+      this.ghost.scale.copy(this.tool.scale);
+    }
+    this.render();
+  }
+
+  setPlaceMode(handlers) {
+    this.placing = handlers;
+    this.controls.enableRotate = !handlers;
+    this.el.classList.toggle('placing', !!handlers);
+    if (!handlers) this.setPathOffset({ X: 0, Y: 0 });
+  }
+
+  // Décalage d'affichage du parcours (aperçu avant de déplacer l'origine).
+  setPathOffset(d) {
+    if (!this.path) return;
+    this.path.position.set(d.X, d.Y, 0);
     this.render();
   }
 
@@ -282,9 +390,10 @@ export class Viewer {
     this.render();
   }
 
-  view(name) {
+  // programOnly : cadre le parcours seul, sans le plateau ni la zone.
+  view(name, { programOnly = false } = {}) {
     let box = this.box ? this.box.clone() : null;
-    if (this.shapesBox) box = box ? box.union(this.shapesBox) : this.shapesBox.clone();
+    if (this.shapesBox && !(programOnly && box)) box = box ? box.union(this.shapesBox) : this.shapesBox.clone();
     if (!box) box = new THREE.Box3(new THREE.Vector3(-50, -50, -10), new THREE.Vector3(50, 50, 10));
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
