@@ -176,13 +176,16 @@ export const fmt = (n) => (Math.round(n * 1000) / 1000).toString();
 // Préambule pour reprendre un programme à la ligne `from` (index dans splitProgram).
 // Restaure les modes, démarre la broche, remonte en sécurité, se place au-dessus
 // du point de reprise puis plonge en vitesse d'avance.
-export function buildResume(lines, from, { spinUpSeconds = 3, plungeFeed = 300 } = {}) {
+// minSafeZ : hauteur de traversée minimale (Z travail). Un programme qui dégage
+// en G53 ne laisse aucune trace de sa hauteur de sécurité en Z travail.
+export function buildResume(lines, from, { spinUpSeconds = 3, plungeFeed = 300, minSafeZ = 5 } = {}) {
   const st = createState();
   let maxZ = -Infinity;
   for (let i = 0; i < from && i < lines.length; i++) {
     step(st, lines[i], (seg) => { maxZ = Math.max(maxZ, seg.from.Z, seg.to.Z); });
   }
-  const safeZ = Number.isFinite(maxZ) ? Math.max(maxZ, st.pos.Z) : Math.max(5, st.pos.Z);
+  const floor = Number.isFinite(minSafeZ) ? minSafeZ : 5;
+  const safeZ = Math.max(Number.isFinite(maxZ) ? maxZ : -Infinity, st.pos.Z, floor);
   const out = ['G21', 'G90', `G${st.wcs}`, `G${st.plane}`, `G${st.feedMode}`];
   out.push(`G0Z${fmt(safeZ)}`);
   if (st.spindle === 3 || st.spindle === 4) {

@@ -57,6 +57,7 @@ export class GrblController extends EventEmitter {
     this.lastProbe = null;
     this.statusWaiters = [];
     this.spindleHeld = false; // broche coupée par Copeau pendant une pause
+    this.restoreOnUnlock = null; // modes à rétablir quand l'alarme est levée
   }
 
   get connected() { return !!this.transport; }
@@ -71,6 +72,9 @@ export class GrblController extends EventEmitter {
     transport.on('error', (e) => this.log('err', `Port : ${e.message}`));
     // Sans bannière (carte qui ne redémarre pas à l'ouverture), on force un reset.
     this.bannerTimer = setTimeout(() => { if (!this.ready) this.realtime('reset'); }, 2500);
+    this.silenceTimer = setTimeout(() => {
+      if (!this.ready) this.log('err', 'La carte ne répond pas : vérifiez le port et la vitesse (115200 pour Grbl, parfois 250000).');
+    }, 6000);
     this.pollTimer = setInterval(() => { if (this.ready) this.writeRaw(Buffer.from([REALTIME.status])); }, POLL_MS);
     this.emitState();
   }
@@ -78,6 +82,7 @@ export class GrblController extends EventEmitter {
   detach(reason) {
     if (!this.transport) return;
     clearTimeout(this.bannerTimer);
+    clearTimeout(this.silenceTimer);
     clearInterval(this.pollTimer);
     const t = this.transport;
     this.transport = null;
@@ -145,7 +150,7 @@ export class GrblController extends EventEmitter {
       const code = Number(m[1]);
       this.log('err', `Alarme ${code} : ${alarmText(code)}`);
       this.status.state = 'Alarm';
-      if (this.job && ['running', 'paused', 'spinup', 'finishing'].includes(this.job.state)) {
+      if (this.job && ['running', 'paused', 'spinup', 'toolchange', 'finishing'].includes(this.job.state)) {
         this.job.state = 'stopped';
         this.job.error = `Alarme ${code} : ${alarmText(code)}`;
         this.emitJob();
@@ -165,12 +170,17 @@ export class GrblController extends EventEmitter {
     }
     if ((m = line.match(/^\$(\d+)=(.*)$/))) {
       this.settings[m[1]] = m[2].trim();
+      // Copeau travaille en mm : des rapports en pouces fausseraient tout.
+      if (m[1] === '13' && m[2].trim() === '1') {
+        this.log('err', 'La carte rapporte les positions en pouces ($13=1) : Copeau attend des mm. Envoyez $13=0.');
+      }
       this.emitSettings();
     }
   }
 
   onBanner(line, version) {
     clearTimeout(this.bannerTimer);
+    clearTimeout(this.silenceTimer);
     this.failPending(new Error('Reset'));
     this.ready = true;
     this.version = version;
@@ -198,6 +208,15 @@ export class GrblController extends EventEmitter {
     const parts = line.slice(1, -1).split('|');
     const [state, sub] = parts[0].split(':');
     const s = this.status;
+    // Alarme levée ($X ou prise d'origine) : rétablir les modes qu'une routine
+    // interrompue avait changés (ex. G91 d'un palpage raté).
+    if (s.state === 'Alarm' && state === 'Idle' && this.restoreOnUnlock) {
+      const lines = this.restoreOnUnlock;
+      this.restoreOnUnlock = null;
+      for (const l of lines) this.cmd(l, 'probe').catch(() => {});
+      this.cmd('$G', 'sync').catch(() => {});
+      this.log('info', `Modes rétablis après l'alarme : ${lines.join(' ')}`);
+    }
     s.state = state;
     s.subState = sub ?? null;
     let mpos = null, wpos = null;
@@ -429,7 +448,8 @@ export class GrblController extends EventEmitter {
   // attente de la montée en vitesse, puis seulement reprise du mouvement.
   async resumeJob({ spinUp = 3 } = {}) {
     const j = this.job;
-    const programPause = j?.state === 'running' && this.status.state === 'Hold';
+    // Pause du programme (M0) ou porte de sécurité : Grbl attend un « ~ ».
+    const programPause = j?.state === 'running' && ['Hold', 'Door'].includes(this.status.state);
     if (j?.state !== 'paused' && !programPause) return;
     if (this.spindleHeld) {
       j.state = 'spinup';

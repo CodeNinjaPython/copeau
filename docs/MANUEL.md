@@ -123,7 +123,7 @@ Une barre rouge sous le haut de l'écran explique l'alarme en cours. Alarmes fr�
 ### Les flèches à l'écran
 
 - **Appui court** : un pas de la taille choisie (0.01, 0.1, 1, 10 ou 50 mm).
-- **Appui maintenu** : le même pas est répété tant que vous gardez le doigt ou le clic. Avec le pas sur 1 : 1 mm, 1 mm, 1 mm… ; avec 10 : 10 mm, 10 mm… Au relâchement, la tête finit seulement le pas en cours et s'arrête : toujours sur un multiple du pas, au plus près de l'endroit où vous avez lâché.
+- **Appui maintenu** : le même pas est répété tant que vous gardez le doigt ou le clic. Avec le pas sur 1 : 1 mm, 1 mm, 1 mm… ; avec 10 : 10 mm, 10 mm… Au relâchement, la tête s'arrête aussitôt, là où elle se trouve.
 - **■** : arrêt immédiat du déplacement.
 - Les diagonales déplacent X et Y en même temps.
 
@@ -376,12 +376,12 @@ Vous pouvez alors :
 
 Après une casse d'outil, une coupure ou un arrêt, l'onglet **Reprise** relance le programme à partir d'une ligne.
 
-1. Choisissez la ligne : champ numérique, curseur, ou **clic sur le parcours dans la vue 3D** (pendant que l'onglet Reprise est ouvert). Le point blanc montre où l'outil reprendra. Après un arrêt, Copeau propose la dernière ligne exécutée.
+1. Choisissez la ligne : champ numérique, curseur, ou **clic sur le parcours dans la vue 3D** (pendant que l'onglet Reprise est ouvert). Le point blanc montre où l'outil reprendra. Après un arrêt, Copeau propose la ligne du parcours la plus proche de la position réelle de l'outil (la carte accepte les lignes bien avant de les usiner : la dernière ligne envoyée serait trop loin).
 2. Lisez le **préambule** affiché : ce sont les commandes envoyées avant la reprise.
 3. Réglez l'**attente broche** (temps de montée en vitesse).
 4. Cliquez **Reprendre à cette ligne**.
 
-Copeau rétablit les modes du programme (unités, repère, plan), relance la broche et l'arrosage s'ils étaient actifs, monte à la hauteur la plus haute utilisée jusque-là, se place au-dessus du point de reprise, puis descend en vitesse lente (300 mm/min maximum).
+Copeau rétablit les modes du programme (unités, repère, plan), relance la broche et l'arrosage s'ils étaient actifs, monte à la hauteur la plus haute utilisée jusque-là (au moins la **hauteur de survol** de l'onglet Zone, 5 mm par défaut, utile pour les programmes qui dégagent en `G53`), se place au-dessus du point de reprise, puis descend en vitesse lente (300 mm/min maximum).
 
 > Les numéros de ligne de Copeau comptent uniquement les lignes envoyées (sans commentaires ni lignes vides). Ils peuvent différer de ceux de votre éditeur de texte : fiez-vous au code affiché.
 
@@ -405,7 +405,7 @@ La ligne du dessous rappelle l'avance réelle (`F`), la vitesse broche (`S`) et 
 
 ### Console
 
-Affiche les échanges avec la carte : commandes envoyées (orange), réponses (gris), informations (bleu), erreurs (rouge). Le champ du bas envoie n'importe quelle commande G-code ou `$`. **↑ / ↓** parcourent l'historique. Boutons rapides : `$$` (réglages), `$G` (modes actifs), `$#` (origines), `$I` (version), `M3 S10000` / `M5` (broche).
+Affiche les échanges avec la carte : commandes envoyées (orange), réponses (gris), informations (bleu), erreurs (rouge). Pendant un usinage (ou sa pause), seules les lectures (`$G`, `$#`, `$I`, `$$`) sont acceptées : une autre commande s'insérerait au milieu du programme. Les macros suivent la même règle. Le champ du bas envoie n'importe quelle commande G-code ou `$`. **↑ / ↓** parcourent l'historique. Boutons rapides : `$$` (réglages), `$G` (modes actifs), `$#` (origines), `$I` (version), `M3 S10000` / `M5` (broche).
 
 ### Macros
 
@@ -432,7 +432,7 @@ Lancez Copeau avec `HOST=0.0.0.0 npm start`, puis ouvrez `http://<adresse-ip-de-
 
 Tous les écrans ouverts voient et commandent **la même machine** en temps réel : vous pouvez lancer un usinage depuis l'ordinateur et le surveiller depuis l'atelier.
 
-> En mode réseau, toute personne connectée au même réseau peut piloter la machine. Ne l'utilisez que sur un réseau de confiance.
+> En mode réseau, toute personne connectée au même réseau peut piloter la machine. Ne l'utilisez que sur un réseau de confiance. Les pages d'autres sites web ouvertes dans un navigateur, elles, ne peuvent pas se connecter à Copeau.
 
 ---
 
@@ -463,6 +463,9 @@ Tous les écrans ouverts voient et commandent **la même machine** en temps rée
 | Le programme est décalé dans la vue | Le zéro ne correspond pas à celui prévu dans la FAO : vérifiez où la FAO place X0 Y0 Z0. |
 | Palpage : alarme 5 | Pas de contact : rapprochez l'outil, augmentez la course, ou vérifiez la pince. |
 | Palpage : alarme 4 | La sonde touchait déjà : vérifiez que la pince ne touche pas la plaque. |
+| « La carte ne répond pas » | Mauvais port ou mauvaise vitesse : essayez 115200 puis 250000. |
+| « Positions en pouces ($13=1) » | Copeau travaille en mm : envoyez `$13=0` dans la console. |
+| « Usinage en cours : commande refusée » | Normal pendant un usinage : utilisez Pause, Arrêter ou les corrections en direct. |
 | La page indique « Serveur perdu » | Le terminal où tourne Copeau a été fermé ou l'ordinateur est en veille. Relancez `npm start`, la page se reconnecte seule. |
 
 Pour aller plus loin, l'historique complet des échanges est dans l'onglet **Console**.

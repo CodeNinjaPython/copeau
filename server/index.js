@@ -51,7 +51,26 @@ app.use('/vendor/three/examples/jsm', (req, res, next) => {
   express.static(addonsDir)(req, res, next);
 });
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 * 1024 });
+
+// Le canal WebSocket pilote la machine : on refuse les pages d'autres sites.
+// Un navigateur envoie toujours l'en-tête Origin ; il doit correspondre à
+// l'adresse de Copeau. L'hôte doit être localhost ou une adresse IP : un nom
+// de domaine signalerait une attaque par « DNS rebinding ».
+function allowedClient(req) {
+  const host = req.headers.host || '';
+  const hostname = host.replace(/:\d+$/, '').replace(/^\[|\]$/g, '');
+  const ipLiteral = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.includes(':');
+  // Noms .local (mDNS du réseau local, ex. mon-mac.local) : pas de rebinding possible.
+  if (hostname !== 'localhost' && !hostname.endsWith('.local') && !ipLiteral) return false;
+  const origin = req.headers.origin;
+  if (!origin) return true; // outil local sans navigateur (tests, scripts)
+  try { return new URL(origin).host === host; } catch { return false; }
+}
+const wss = new WebSocketServer({
+  server,
+  maxPayload: 64 * 1024 * 1024,
+  verifyClient: ({ req }) => allowedClient(req),
+});
 
 const grbl = new GrblController();
 const logHistory = [];
@@ -125,23 +144,20 @@ function openTransport(portPath, baudRate) {
 
 // ---- Messages clients ------------------------------------------------------
 
-const jogDistance = 1000; // jog continu : coupé par jogCancel au relâchement
 const AXIS_INDEX = { X: 0, Y: 1, Z: 2 };
 
-// Distance d'un jog continu. Avec les limites logicielles ($20=1), Grbl refuse
-// tout jog dont la cible sort du volume (error:15) : on vise alors juste avant
-// la limite. Volume machine Grbl standard : de -$13x à 0 après prise d'origine.
-function continuousDistance(axis, dir) {
-  if (grbl.settings[20] !== '1') return dir * jogDistance;
-  const travel = Number(grbl.settings[130 + AXIS_INDEX[axis]]);
-  const pos = grbl.status.mpos[axis];
-  if (!travel) return dir * jogDistance;
-  const margin = 0.5;
-  const d = dir > 0 ? 0 - margin - pos : -travel + margin - pos;
-  return Math.sign(d) === dir ? d : 0;
-}
-
 let pathRun = null;
+
+// Pendant un usinage (ou sa pause), une ligne envoyée passerait avant la suite
+// du programme et s'insérerait au milieu. Seules les lectures sont permises.
+// Au changement d'outil, la machine est à l'arrêt : tout est permis.
+const READ_ONLY = /^\$(G|#|I|\$)$/;
+function guardJobLines(lines) {
+  const busy = ['running', 'paused', 'spinup', 'finishing', 'stopping'].includes(grbl.job?.state);
+  if (busy && lines.some((l) => !READ_ONLY.test(l.toUpperCase()))) {
+    throw new Error('Usinage en cours : commande refusée. Utilisez Pause, Arrêter ou les corrections en direct.');
+  }
+}
 
 const handlers = {
   async ports() { return listPorts(); },
@@ -155,24 +171,18 @@ const handlers = {
   async disconnect() { grbl.detach('Déconnecté par l\'utilisateur'); },
 
   async cmd({ line }) {
-    for (const l of String(line).split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
-      grbl.cmd(l).catch(() => {}); // l'erreur est déjà journalisée
-    }
+    const lines = String(line).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    guardJobLines(lines);
+    for (const l of lines) grbl.cmd(l).catch(() => {}); // l'erreur est déjà journalisée
   },
 
   async realtime({ name }) { grbl.realtime(name); },
 
-  async jog({ axes, feed, continuous }, ws) {
+  async jog({ axes, feed }) {
     const parts = Object.entries(axes)
-      .filter(([a, v]) => a in AXIS_INDEX && Number(v))
-      .map(([a, v]) => [a, continuous ? continuousDistance(a, Math.sign(v)) : Number(v)])
-      .filter(([, d]) => Math.abs(d) >= 0.001)
-      .map(([a, d]) => `${a}${d.toFixed(3)}`);
-    if (!parts.length) {
-      if (continuous) throw new Error('Limite logicielle atteinte dans cette direction');
-      return;
-    }
-    if (continuous) ws.jogging = true;
+      .filter(([a, v]) => a in AXIS_INDEX && Math.abs(Number(v)) >= 0.001)
+      .map(([a, v]) => `${a}${Number(v).toFixed(3)}`);
+    if (!parts.length) return;
     await grbl.cmd(`$J=G91G21${parts.join('')}F${Number(feed) || 1000}`, 'jog');
   },
 
@@ -238,8 +248,7 @@ const handlers = {
   // Annulation du jog. Comme le recommande la doc Grbl, un G4P0 suit
   // l'annulation : son « ok » arrive une fois l'arrêt terminé, la position
   // lue ensuite est donc la position finale.
-  async jogStop(_, ws) {
-    ws.jogging = false;
+  async jogStop() {
     if (pathRun) pathRun.abort = true;
     if (!grbl.ready) return;
     grbl.dropQueued('jog');
@@ -251,8 +260,8 @@ const handlers = {
   async setConfig({ key, value }) { await setConfig(key, value); },
 
   async load({ name, text }) { grbl.loadJob(String(name || 'programme.nc'), String(text)); },
-  async run({ from = 0, toolChange = true, spinUp = 3 }) {
-    grbl.runJob(Number(from), { toolChange, spinUpSeconds: Number(spinUp) });
+  async run({ from = 0, toolChange = true, spinUp = 3, safeZ = 5 }) {
+    grbl.runJob(Number(from), { toolChange, spinUpSeconds: Number(spinUp), minSafeZ: Number(safeZ) });
   },
   async pause({ stopSpindle = false }) { grbl.pauseJob({ stopSpindle: !!stopSpindle }); },
   async resume({ spinUp = 3 }) {
@@ -280,10 +289,10 @@ const handlers = {
   async runMacro({ id }) {
     const m = (await loadMacros()).find((x) => x.id === id);
     if (!m) throw new Error('Macro introuvable');
+    const lines = m.gcode.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    guardJobLines(lines);
     grbl.log('info', `Macro : ${m.name}`);
-    for (const l of m.gcode.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)) {
-      grbl.cmd(l, 'macro').catch(() => {});
-    }
+    for (const l of lines) grbl.cmd(l, 'macro').catch(() => {});
   },
 };
 
@@ -308,9 +317,6 @@ wss.on('connection', (ws) => {
       send({ t: 'reply', id: msg.id, ok: false, error: e.message });
     }
   });
-
-  // Sécurité : un écran qui disparaît pendant un jog continu l'arrête.
-  ws.on('close', () => { if (ws.jogging) grbl.realtime('jogCancel'); });
 });
 
 export async function startServer({ port = PORT, host = HOST, threeAddonsDir, dataDir: dir } = {}) {
