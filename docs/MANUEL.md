@@ -123,7 +123,7 @@ Une barre rouge sous le haut de l'écran explique l'alarme en cours. Alarmes fr�
 ### Les flèches à l'écran
 
 - **Appui court** : un pas de la taille choisie (0.01, 0.1, 1, 10 ou 50 mm).
-- **Appui maintenu** : mouvement continu tant que vous gardez le doigt ou le clic. La tête s'arrête au relâchement.
+- **Appui maintenu** : le même pas est répété tant que vous gardez le doigt ou le clic. Avec le pas sur 1 : 1 mm, 1 mm, 1 mm… ; avec 10 : 10 mm, 10 mm… Au relâchement, le pas en cours se termine : la tête s'arrête toujours sur un multiple du pas.
 - **■** : arrêt immédiat du déplacement.
 - Les diagonales déplacent X et Y en même temps.
 
@@ -138,13 +138,13 @@ Une barre rouge sous le haut de l'écran explique l'alarme en cours. Alarmes fr�
 | + / − (ou Page ↑ / Page ↓) | Z+ / Z− |
 | Échap | Arrête tout déplacement |
 
-Même règle : appui court = un pas, appui maintenu = continu. Les flèches ne déplacent pas la machine quand vous tapez dans un champ de saisie.
+Même règle : appui = un pas, appui maintenu = le pas répété. Les flèches ne déplacent pas la machine quand vous tapez dans un champ de saisie.
 
 ### En cliquant sur le plateau
 
 Cliquez à un endroit de la vue 3D : une cible verte apparaît avec une bulle **Aller ici**. La case **Monter d'abord à Z…** remonte l'outil à la hauteur de survol avant de traverser, pour ne pas frotter la pièce. Le point visé est sur le plan Z0 du repère de travail. Si un plateau est défini, un clic en dehors est refusé.
 
-> **Sécurités du déplacement.** Tous les déplacements passent par le jog de Grbl : ils s'arrêtent avec Échap ou ■. Si la page se ferme ou perd la connexion pendant un jog continu, Copeau l'arrête. Avec les limites logicielles actives (`$20=1`), le jog continu s'arrête 0,5 mm avant la limite.
+> **Sécurités du déplacement.** Tous les déplacements passent par le jog de Grbl : ils s'arrêtent avec Échap ou ■. Si la page se ferme ou perd la connexion, plus aucun pas n'est envoyé : la tête s'arrête au plus un pas plus loin. Avec les limites logicielles actives (`$20=1`), un pas qui sortirait de la course est refusé par la carte.
 
 ---
 
@@ -440,7 +440,7 @@ Tous les écrans ouverts voient et commandent **la même machine** en temps rée
 
 | Touche | Action |
 |---|---|
-| ← → ↑ ↓ | Jog X / Y (court = un pas, maintenu = continu) |
+| ← → ↑ ↓ | Jog X / Y (appui = un pas, maintenu = le pas répété) |
 | + / − ou Page ↑ / Page ↓ | Jog Z (rangée principale ou pavé numérique) |
 | Espace | Lecture / pause de la simulation |
 | Échap | Arrête le jog ou le parcours, ferme la bulle *Aller ici*, annule un tracé |
