@@ -51,6 +51,21 @@ npm test
 
 Les tests utilisent le simulateur intégré (pièce virtuelle de 100 × 100 × 30 mm percée d'un trou Ø25, fraise Ø6).
 
+## Travailler à plusieurs
+
+On ne pousse pas directement sur `main` : chaque changement passe par une branche et une pull request.
+
+```bash
+git switch main && git pull              # récupérer le travail de l'autre
+git switch -c ma-fonction                # une branche par sujet
+# ... modifications ...
+npm test                                 # vérifier avant de pousser
+git add -A && git commit -m "Ce qui change"
+git push -u origin ma-fonction           # puis ouvrir la pull request sur GitHub
+```
+
+Les tests tournent automatiquement sur chaque pull request (GitHub Actions). On fusionne quand ils sont verts et que l'autre a relu. Après la fusion : `git switch main && git pull`.
+
 ## Structure
 
 - `server/grbl.js` : protocole Grbl (envoi par comptage de caractères, état, jobs)
