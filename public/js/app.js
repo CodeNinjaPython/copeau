@@ -1,5 +1,6 @@
 import { Viewer, outline } from './viewer.js';
 import { startTour } from './tour.js';
+import { Preview } from './preview.js';
 import { splitProgram, analyze, buildResume } from './shared/gcode.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -248,6 +249,7 @@ function updateEnabled() {
   $('#btn-stop').disabled = !jobActive || j.state === 'stopping';
   $('#btn-probe').disabled = !idle || (jobActive && j.state !== 'toolchange');
   $('#btn-place').disabled = !canRun && !$('#btn-place').classList.contains('active');
+  $('#btn-preview').disabled = !S.lines.length || (jobActive && !preview?.active);
   const zoneOutline = $('.zone-card[data-target="zone"] [data-outline]');
   if (zoneOutline) {
     zoneOutline.disabled = !S.zones.zone || !canJog;
@@ -338,6 +340,11 @@ function jogBlockedReason() {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { act('jogStop').catch(() => {}); closeGoto(); stopDraw(); stopPlace(); return; }
+  if (e.key === ' ' && preview.active && !typing(e) && e.target.tagName !== 'BUTTON') {
+    e.preventDefault();
+    preview.playing ? preview.pause() : preview.play();
+    return;
+  }
   if (!KEYS[e.key] || typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
   e.preventDefault();
   if (e.target.tagName === 'SELECT') e.target.blur();
@@ -373,6 +380,7 @@ function onJobText(name, text) {
   $('#job-meta').textContent = [`${i.lines} lignes`, `≈ ${fmtDuration(i.seconds)}`, dims,
     i.toolChanges ? `${i.toolChanges} changement(s) d'outil` : ''].filter(Boolean).join(' · ');
   if (Number.isFinite(i.min.Z) && i.min.Z >= 0) toast('Attention : aucune passe sous Z0. Le zéro Z est-il au bon endroit ?', 'err');
+  closePreview();
   setupResume();
   renderZones();
   const fit = fitCheck();
@@ -399,6 +407,7 @@ const JOB_STATE = {
 
 function renderJob() {
   const j = S.job;
+  if (j && ['running', 'finishing'].includes(j.state)) closePreview();
   const bar = $('#job-progress');
   if (!j) { bar.style.width = '0'; updateEnabled(); return; }
   const pct = j.total ? (j.acked / j.total) * 100 : 0;
@@ -892,6 +901,70 @@ $('#zone-safe-z').value = store.get('safeZ', 5);
 $('#zone-safe-z').onchange = () => store.set('safeZ', safeZ());
 
 
+
+// ---- Simulation avant usinage --------------------------------------------------
+
+const preview = new Preview(viewer, { onFrame: renderPlaybar });
+let scrubbing = false;
+
+function renderPlaybar(st) {
+  $('#pb-play').textContent = st.playing ? '⏸' : '▶';
+  if (!scrubbing) $('#pb-scrub').value = st.total ? Math.round((st.t / st.total) * 1000) : 0;
+  $('#pb-time').textContent = `${fmtClock(st.t)} / ${fmtClock(st.total)}`;
+  $('#pb-line').textContent = S.lines.length ? `L${st.line + 1}  ${S.lines[st.line]}` : '';
+}
+const fmtClock = (sec) => {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const mm = String(m).padStart(h ? 2 : 1, '0'), ss = String(s).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+};
+
+function openPreview() {
+  if (!S.lines.length) return toast('Chargez d\'abord un programme', 'err');
+  const jobActive = ['running', 'paused', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
+  if (jobActive) return toast('Simulation indisponible pendant un usinage', 'err');
+  closeGoto();
+  stopDraw();
+  stopPlace();
+  try {
+    preview.open({ rapidRate: Number(S.settings[110]) || 3000, toolDia: Number($('#pb-tool').value) || 6 });
+  } catch (e) { return toast(e.message, 'err'); }
+  preview.speed = Number($('#pb-speed').value);
+  preview.setShowStock($('#pb-stock').checked);
+  $('#playbar').hidden = false;
+  $('#btn-preview').classList.add('active');
+  $('#btn-preview').textContent = '■ Simulation';
+  if (!preview.cutBounds) toast('Aucune passe sous Z0 : pas de matière à creuser', 'info');
+  viewer.view('iso', { programOnly: true });
+  preview.play();
+}
+function closePreview() {
+  if (!preview.active) return;
+  preview.close();
+  $('#playbar').hidden = true;
+  $('#btn-preview').classList.remove('active');
+  $('#btn-preview').textContent = '▶ Simuler';
+  renderJob();
+}
+$('#btn-preview').onclick = () => (preview.active ? closePreview() : openPreview());
+$('#pb-close').onclick = closePreview;
+$('#pb-play').onclick = () => (preview.playing ? preview.pause() : preview.play());
+$('#pb-restart').onclick = () => preview.seek(0);
+$('#pb-scrub').addEventListener('pointerdown', () => { scrubbing = true; });
+$('#pb-scrub').addEventListener('input', (e) => preview.seekFraction(Number(e.target.value) / 1000));
+$('#pb-scrub').addEventListener('change', () => { scrubbing = false; });
+$('#pb-speed').value = String(store.get('pbSpeed', 5));
+$('#pb-speed').onchange = (e) => { preview.speed = Number(e.target.value); store.set('pbSpeed', preview.speed); };
+$('#pb-tool').value = store.get('pbTool', store.get('probe.corner', {}).toolDia ?? 6);
+$('#pb-tool').onchange = (e) => {
+  const d = Number(e.target.value);
+  if (!(d > 0)) return;
+  store.set('pbTool', d);
+  preview.setToolDia(d);
+};
+$('#pb-stock').onchange = (e) => preview.setShowStock(e.target.checked);
+
 // ---- Placer le programme sur le plateau ------------------------------------
 // On glisse le parcours ; à la validation, l'origine X/Y est décalée d'autant
 // (G10 L20 sur la position actuelle). Le fichier G-code ne change pas.
@@ -905,6 +978,7 @@ function canPlace() {
 function startPlace() {
   if (!S.lines.length) return toast('Chargez d\'abord un programme', 'err');
   if (!canPlace()) return toast('La machine doit être Prêt, sans usinage en cours', 'err');
+  closePreview();
   closeGoto();
   stopDraw();
   placeDelta = null;
@@ -964,7 +1038,7 @@ const TOUR = [
   {
     title: 'Bienvenue dans Copeau',
     body: `<p>Copeau pilote une CNC <b>Grbl / grblHAL</b> depuis le navigateur.</p>
-      <p>Cette démo présente l'écran en 12 étapes. Utilisez <kbd>→</kbd> / <kbd>←</kbd> ou les boutons. À la fin, vous pourrez tout essayer sur une <b>machine simulée</b>, sans risque.</p>
+      <p>Cette démo présente l'écran en 13 étapes. Utilisez <kbd>→</kbd> / <kbd>←</kbd> ou les boutons. À la fin, vous pourrez tout essayer sur une <b>machine simulée</b>, sans risque.</p>
       <p class="muted">Gardez toujours l'arrêt d'urgence de la vraie machine à portée de main.</p>`,
   },
   {
@@ -998,6 +1072,11 @@ const TOUR = [
   {
     target: '#btn-place', title: 'Placer le programme',
     body: `<p><b>Placer</b> permet de glisser le parcours sur le plateau. Copeau indique si la nouvelle position tient dans la zone, puis décale l'origine X/Y d'autant.</p>`,
+  },
+  {
+    target: '#btn-preview', title: 'Simuler avant de lancer',
+    body: `<p><b>▶ Simuler</b> joue l'usinage dans la vue : un outil vert suit le parcours à la vitesse du programme et <b>creuse la matière</b> au fur et à mesure.</p>
+      <p>Barre de lecture : ▶ / ⏸ (ou <kbd>Espace</kbd>), curseur pour aller à n'importe quel moment, vitesse 1× à 100×, diamètre de fraise. Rien n'est envoyé à la machine.</p>`,
   },
   {
     target: '.job-bar', title: 'Programme',

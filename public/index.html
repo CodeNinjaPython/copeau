@@ -107,6 +107,7 @@
         <button data-view="front" class="ghost">Face</button>
         <button data-view="fit" class="ghost">Cadrer</button>
         <button id="btn-place" class="ghost" title="Glisser le parcours pour le placer sur le plateau">Placer</button>
+        <button id="btn-preview" class="ghost" title="Voir l'usinage simulé avant de lancer">▶ Simuler</button>
       </div>
       <div class="drop-hint" id="drop-hint">Glissez un fichier G-code ici</div>
       <div class="goto-pop" id="goto-pop" hidden>
@@ -127,6 +128,21 @@
         </div>
       </div>
       <div class="viewer-hint muted small" id="viewer-hint">Cliquez sur le plateau pour y amener la tête · flèches / PgUp / PgDn pour déplacer · Échap = stop</div>
+      <div class="playbar" id="playbar" hidden>
+        <button id="pb-play" class="primary pb-btn" title="Lecture / pause (Espace)">▶</button>
+        <button id="pb-restart" class="ghost pb-btn" title="Revenir au début">⏮</button>
+        <div class="pb-track">
+          <input id="pb-scrub" type="range" min="0" max="1000" step="1" value="0" aria-label="Position dans la simulation">
+          <div class="pb-info"><span id="pb-time">0 s / 0 s</span><span id="pb-line" class="pb-code"></span></div>
+        </div>
+        <select id="pb-speed" title="Vitesse de la simulation">
+          <option value="1">1×</option><option value="2">2×</option><option value="5" selected>5×</option>
+          <option value="10">10×</option><option value="25">25×</option><option value="100">100×</option>
+        </select>
+        <label class="pb-opt" title="Diamètre de la fraise simulée">Ø <input id="pb-tool" type="number" min="0.1" step="0.1" value="6"></label>
+        <label class="check pb-opt"><input type="checkbox" id="pb-stock" checked> Matière</label>
+        <button id="pb-close" class="ghost pb-btn" title="Quitter la simulation">✕</button>
+      </div>
       <div class="job-bar" id="job-bar">
         <div class="job-name"><span id="job-name">Aucun programme</span><span class="muted small" id="job-meta"></span></div>
         <div class="progress"><div id="job-progress"></div></div>

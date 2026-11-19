@@ -29,6 +29,7 @@ Attention : n'importe qui sur ce réseau peut alors commander la machine.
 - **Position** travail et machine, zéro par axe, retour X0 Y0.
 - **Jog** : appui court = un pas, appui maintenu = mouvement continu jusqu'au relâchement. Clavier : flèches (X/Y), PgUp/PgDn (Z). Le jog s'arrête si l'écran se déconnecte.
 - **Visualiseur 3D** du parcours d'outil avec suivi en temps réel : position de l'outil, partie usinée en orange, temps restant.
+- **Simuler** avant de lancer : lecture animée de l'usinage avec enlèvement de matière, curseur, vitesse 1× à 100×.
 - **Placer** : glisser le parcours sur le plateau, l'origine X/Y est décalée d'autant.
 - **Plateau et zone de travail** : rectangle (2 coins) ou cercle, vérification que le programme tient, parcours du contour.
 - **Clic sur le plateau** pour y amener la tête.

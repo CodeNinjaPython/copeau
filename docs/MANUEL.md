@@ -246,6 +246,28 @@ La barre du programme affiche le nombre de lignes, la **durée estimée**, les d
 
 **Vue 3D :** glisser = tourner, clic droit ou deux doigts = déplacer, molette ou pincement = zoomer. Boutons **3D**, **Dessus**, **Face**, **Cadrer**.
 
+### Simuler l'usinage avant de lancer
+
+**▶ Simuler** (en haut de la vue 3D) joue l'usinage sans rien envoyer à la machine :
+
+- un **outil vert** parcourt le trajet à la vitesse du programme (avances et rapides) ;
+- un bloc de **matière** virtuel, dessus à Z0, se creuse au passage d'une fraise droite du diamètre choisi ;
+- le parcours déjà simulé passe en vert ; l'outil jaune reste la position réelle de la machine.
+
+| Commande | Rôle |
+|---|---|
+| ▶ / ⏸ ou **Espace** | Lecture / pause |
+| ⏮ | Retour au début |
+| Curseur | Aller à n'importe quel moment (avant ou arrière) |
+| 1× à 100× | Vitesse de lecture (1× = temps réel) |
+| Ø | Diamètre de la fraise simulée |
+| Matière | Affiche ou masque le bloc |
+| ✕ ou **■ Simulation** | Quitte la simulation |
+
+Sous le curseur s'affichent le temps simulé, la durée totale et la ligne de G-code en cours. La simulation se ferme d'elle-même si un nouveau programme est chargé ou si l'usinage réel démarre.
+
+> La simulation suppose une fraise droite et un dessus de pièce à Z0. Elle sert à vérifier les trajets, les profondeurs et l'ordre des opérations. Elle ne reproduit ni les accélérations de la machine ni les efforts de coupe : la durée réelle sera un peu plus longue.
+
 ### Placer le programme sur le plateau
 
 Pour déplacer le parcours sur le plateau (par exemple pour usiner dans une chute à un autre endroit) :
