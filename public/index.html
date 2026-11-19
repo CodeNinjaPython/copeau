@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14161a">
+  <title>Copeau</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M6 26 L16 4 L26 26 Z' fill='%23f08a24'/></svg>">
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="importmap">
+    { "imports": {
+      "three": "/vendor/three/build/three.module.js",
+      "three/addons/": "/vendor/three/examples/jsm/"
+    } }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo"></span>Copeau</div>
+    <div class="connect">
+      <select id="port" aria-label="Port"></select>
+      <select id="baud" aria-label="Vitesse">
+        <option>115200</option><option>250000</option><option>57600</option><option>9600</option>
+      </select>
+      <button id="btn-refresh" class="ghost icon" title="Rafraîchir les ports">↻</button>
+      <button id="btn-connect" class="primary">Connecter</button>
+    </div>
+    <div class="machine-state">
+      <span id="state-badge" class="badge">Déconnecté</span>
+      <button id="btn-unlock" class="ghost" title="Déverrouiller ($X)">Déverrouiller</button>
+      <button id="btn-home" class="ghost" title="Prise d'origine ($H)">Origine</button>
+      <button id="btn-reset" class="danger" title="Reset logiciel (Ctrl-X)">Reset</button>
+    </div>
+  </header>
+
+  <div id="alarm-bar" class="alarm-bar" hidden></div>
+
+  <main class="layout">
+    <!-- Colonne gauche : position et déplacements -->
+    <section class="panel left">
+      <div class="dro">
+        <div class="dro-head">
+          <span>Position travail <b id="wcs-name">G54</b></span>
+          <span class="muted small" id="units">mm</span>
+        </div>
+        <div class="dro-rows" id="dro"></div>
+        <div class="row gap">
+          <button data-zero="XYZ" class="ghost grow">Zéro XYZ</button>
+          <button data-zero="XY" class="ghost grow">Zéro XY</button>
+          <button id="btn-goto-zero" class="ghost grow" title="Aller à X0 Y0">→ X0 Y0</button>
+        </div>
+      </div>
+
+      <div class="jog">
+        <div class="section-title">Déplacement <span class="muted small">flèches · PgUp/PgDn · maintenir = continu</span></div>
+        <div class="jog-grid">
+          <button data-jog="X-1 Y1" class="jog-btn diag">↖</button>
+          <button data-jog="Y1" class="jog-btn">Y+</button>
+          <button data-jog="X1 Y1" class="jog-btn diag">↗</button>
+          <button data-jog="Z1" class="jog-btn z">Z+</button>
+          <button data-jog="X-1" class="jog-btn">X−</button>
+          <button id="jog-stop" class="jog-btn stop" title="Arrêter le jog">■</button>
+          <button data-jog="X1" class="jog-btn">X+</button>
+          <span></span>
+          <button data-jog="X-1 Y-1" class="jog-btn diag">↙</button>
+          <button data-jog="Y-1" class="jog-btn">Y−</button>
+          <button data-jog="X1 Y-1" class="jog-btn diag">↘</button>
+          <button data-jog="Z-1" class="jog-btn z">Z−</button>
+        </div>
+        <div class="seg" id="jog-steps" role="radiogroup" aria-label="Pas">
+          <button data-step="0.01">0.01</button><button data-step="0.1">0.1</button>
+          <button data-step="1">1</button><button data-step="10">10</button><button data-step="50">50</button>
+        </div>
+        <label class="field inline">Vitesse jog
+          <input id="jog-feed" type="number" min="10" step="100" value="2000"><span class="muted">mm/min</span>
+        </label>
+      </div>
+
+      <div class="overrides">
+        <div class="section-title">Corrections en direct</div>
+        <div class="ov" data-ov="feed">
+          <span>Avance</span><b id="ov-feed">100%</b>
+          <button data-rt="feedMinus10">−10</button><button data-rt="feed100">100</button><button data-rt="feedPlus10">+10</button>
+        </div>
+        <div class="ov" data-ov="spindle">
+          <span>Broche</span><b id="ov-spindle">100%</b>
+          <button data-rt="spindleMinus10">−10</button><button data-rt="spindle100">100</button><button data-rt="spindlePlus10">+10</button>
+        </div>
+        <div class="ov" data-ov="rapid">
+          <span>Rapide</span><b id="ov-rapid">100%</b>
+          <button data-rt="rapid25">25</button><button data-rt="rapid50">50</button><button data-rt="rapid100">100</button>
+        </div>
+        <div class="live muted small"><span id="live-feed">F 0</span> · <span id="live-speed">S 0</span> · <span id="live-modal"></span></div>
+      </div>
+    </section>
+
+    <!-- Centre : visualiseur -->
+    <section class="viewer-wrap">
+      <div id="viewer" class="viewer"></div>
+      <div class="viewer-tools">
+        <button data-view="iso" class="ghost">3D</button>
+        <button data-view="top" class="ghost">Dessus</button>
+        <button data-view="front" class="ghost">Face</button>
+        <button data-view="fit" class="ghost">Cadrer</button>
+      </div>
+      <div class="drop-hint" id="drop-hint">Glissez un fichier G-code ici</div>
+      <div class="goto-pop" id="goto-pop" hidden>
+        <div class="goto-coords" id="goto-coords"></div>
+        <label class="check small"><input type="checkbox" id="goto-lift" checked> Monter d'abord à Z <span id="goto-safe">5</span></label>
+        <div class="row gap">
+          <button id="goto-go" class="primary grow">Aller ici</button>
+          <button id="goto-cancel" class="ghost" title="Annuler (Échap)">✕</button>
+        </div>
+      </div>
+      <div class="viewer-hint muted small" id="viewer-hint">Cliquez sur le plateau pour y amener la tête · flèches / PgUp / PgDn pour déplacer · Échap = stop</div>
+      <div class="job-bar" id="job-bar">
+        <div class="job-name"><span id="job-name">Aucun programme</span><span class="muted small" id="job-meta"></span></div>
+        <div class="progress"><div id="job-progress"></div></div>
+        <div class="job-times muted small"><span id="job-elapsed"></span><span id="job-remaining"></span></div>
+        <div class="job-actions">
+          <label class="ghost file-btn">Ouvrir<input id="file-input" type="file" accept=".nc,.gcode,.ngc,.tap,.gc,.cnc,.txt" hidden></label>
+          <button id="btn-run" class="primary">Démarrer</button>
+          <button id="btn-pause" class="warn">Pause</button>
+          <button id="btn-stop" class="danger">Arrêter</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Colonne droite : onglets -->
+    <section class="panel right">
+      <nav class="tabs" role="tablist">
+        <button data-tab="console" class="active">Console</button>
+        <button data-tab="resume">Reprise</button>
+        <button data-tab="probe">Palpage</button>
+        <button data-tab="zones">Zone</button>
+        <button data-tab="macros">Macros</button>
+        <button data-tab="settings">Réglages</button>
+      </nav>
+
+      <div class="tab" data-pane="console">
+        <div id="console" class="console"></div>
+        <form id="console-form" class="row gap">
+          <input id="console-input" autocomplete="off" spellcheck="false" placeholder="G-code ou commande $ (↑ historique)">
+          <button class="primary">Envoyer</button>
+        </form>
+        <div class="row gap wrap quick">
+          <button data-cmd="$$" class="ghost small">$$</button>
+          <button data-cmd="$G" class="ghost small">$G</button>
+          <button data-cmd="$#" class="ghost small">$#</button>
+          <button data-cmd="$I" class="ghost small">$I</button>
+          <button data-cmd="M3 S10000" class="ghost small">M3 S10000</button>
+          <button data-cmd="M5" class="ghost small">M5</button>
+          <button id="btn-clear-console" class="ghost small">Effacer</button>
+        </div>
+      </div>
+
+      <div class="tab" data-pane="resume" hidden>
+        <p class="muted">Reprendre un usinage interrompu à partir d'une ligne. Copeau restaure les modes, démarre la broche, remonte au Z de sécurité, se place au-dessus du point puis plonge doucement.</p>
+        <label class="field">Ligne de reprise
+          <input id="resume-line" type="number" min="1" value="1">
+        </label>
+        <input id="resume-slider" type="range" min="1" value="1">
+        <pre id="resume-context" class="code-context"></pre>
+        <label class="field inline">Attente broche <input id="resume-spinup" type="number" min="0" value="3"><span class="muted">s</span></label>
+        <pre id="resume-preamble" class="code-context muted"></pre>
+        <button id="btn-resume-run" class="primary block">Reprendre à cette ligne</button>
+      </div>
+
+      <div class="tab" data-pane="probe" hidden>
+        <div class="seg" id="probe-kind">
+          <button data-kind="z" class="active">Z</button>
+          <button data-kind="corner">Coin XYZ</button>
+          <button data-kind="center">Centre de trou</button>
+        </div>
+        <p class="muted small" id="probe-help"></p>
+        <div class="probe-corners" id="probe-corners" hidden>
+          <button data-corner="BL">↖ Arr. gauche</button><button data-corner="BR">↗ Arr. droit</button>
+          <button data-corner="FL" class="active">↙ Av. gauche</button><button data-corner="FR">↘ Av. droit</button>
+        </div>
+        <div class="grid2" id="probe-fields"></div>
+        <label class="check"><input type="checkbox" id="probe-confirm"> La sonde est branchée et testée (pince sur l'outil)</label>
+        <button id="btn-probe" class="primary block">Lancer le palpage</button>
+        <div id="probe-result" class="probe-result" hidden></div>
+      </div>
+
+      <div class="tab" data-pane="zones" hidden>
+        <p class="muted small">Amenez l'outil sur un point puis capturez-le, tracez deux clics dans la vue 3D, ou tapez les valeurs (repère travail). Les formes sont mémorisées en coordonnées machine : elles restent en place si vous changez le zéro.</p>
+
+        <section class="zone-card" data-target="table">
+          <div class="section-title">Plateau <span class="muted small" data-size></span></div>
+          <div class="zone-form" data-form></div>
+          <div class="row gap wrap">
+            <button class="ghost small" data-draw>Tracer sur la vue</button>
+            <button class="ghost small" data-from-grbl title="Volume machine Grbl après prise d'origine">Depuis $130 / $131</button>
+            <button class="ghost small" data-clear>Effacer</button>
+          </div>
+        </section>
+
+        <section class="zone-card" data-target="zone">
+          <div class="section-title">Zone de travail <span class="muted small" data-size></span></div>
+          <div class="seg" data-kind-seg>
+            <button data-kind="rect">Rectangle (2 coins)</button>
+            <button data-kind="circle">Cercle (centre + bord)</button>
+          </div>
+          <div class="zone-form" data-form></div>
+          <div class="row gap wrap">
+            <button class="ghost small" data-draw>Tracer sur la vue</button>
+            <button class="ghost small" data-from-job>Depuis le programme</button>
+            <button class="ghost small" data-clear>Effacer</button>
+          </div>
+          <button class="primary block" data-outline>Parcourir le contour</button>
+        </section>
+
+        <section class="zone-card">
+          <div class="section-title">Programme</div>
+          <div id="fit-status" class="fit-status muted">Aucun programme chargé</div>
+          <button id="btn-outline-job" class="ghost block">Parcourir le cadre du programme</button>
+        </section>
+        <label class="field inline">Hauteur de survol <input id="zone-safe-z" type="number" step="any" value="5"><span class="muted">mm (Z travail)</span></label>
+      </div>
+
+      <div class="tab" data-pane="macros" hidden>
+        <div id="macro-list" class="macro-list"></div>
+        <details class="macro-edit">
+          <summary>Nouvelle macro / modifier</summary>
+          <input id="macro-name" placeholder="Nom">
+          <textarea id="macro-gcode" rows="6" spellcheck="false" placeholder="G-code, une ligne par commande"></textarea>
+          <div class="row gap"><button id="btn-macro-save" class="primary grow">Enregistrer</button><button id="btn-macro-new" class="ghost">Vider</button></div>
+        </details>
+      </div>
+
+      <div class="tab" data-pane="settings" hidden>
+        <input id="settings-filter" placeholder="Filtrer les réglages…">
+        <div id="settings-list" class="settings-list"><p class="muted">Connectez une machine pour lire ses réglages ($$).</p></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toolchange" class="modal" hidden>
+    <div class="modal-card">
+      <h2>Changement d'outil</h2>
+      <p>Le programme demande l'outil <b id="tool-number"></b>. La broche est à l'arrêt seulement si votre programme l'a coupée : vérifiez avant de toucher l'outil.</p>
+      <ol class="muted">
+        <li>Remontez Z et changez l'outil (le jog fonctionne).</li>
+        <li>Refaites le zéro Z (onglet Palpage &gt; Z).</li>
+        <li>Continuez le programme.</li>
+      </ol>
+      <div class="row gap">
+        <button id="btn-tool-probe" class="ghost grow">Palper Z</button>
+        <button id="btn-tool-continue" class="primary grow">Continuer</button>
+        <button id="btn-tool-stop" class="danger">Arrêter</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

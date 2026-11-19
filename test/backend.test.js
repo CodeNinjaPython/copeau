@@ -1,0 +1,113 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { GrblController } from '../server/grbl.js';
+import { GrblSimulator } from '../server/simulator.js';
+import { probeZ, probeCorner, probeCenter } from '../server/probe.js';
+import { splitProgram, buildResume, analyze, arcPoints } from '../public/js/shared/gcode.js';
+
+const near = (a, b, tol = 0.01) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`);
+
+async function setup() {
+  const c = new GrblController();
+  const sim = new GrblSimulator({ speedup: 40 });
+  c.attach(sim, 'sim');
+  await new Promise((r) => { const t = setInterval(() => { if (c.ready) { clearInterval(t); r(); } }, 10); });
+  await c.cmd('$X');
+  await c.nextStatus();
+  return { c, close: () => c.detach('fin') };
+}
+
+async function waitFor(fn, ms = 10000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (fn()) return; await new Promise((r) => setTimeout(r, 20)); }
+  throw new Error('timeout');
+}
+
+test('gcode : arcs et analyse', () => {
+  const lines = splitProgram('G21 G90 (commentaire)\nG0 X0 Y0\nG1 Z-1 F100 ; plongée\nG2 X10 Y0 I5 J0\n%');
+  assert.deepEqual(lines, ['G21G90', 'G0X0Y0', 'G1Z-1F100', 'G2X10Y0I5J0']);
+  const a = analyze(lines);
+  near(a.max.X, 10);
+  near(a.min.Z, -1);
+  const { pts, length } = arcPoints({ from: { X: 0, Y: 0, Z: 0 }, to: { X: 10, Y: 0, Z: 0 }, center: { X: 5, Y: 0 }, cw: true, plane: 17 });
+  near(length, Math.PI * 5);
+  assert.ok(pts.every((p) => p.Y >= -1e-9), 'G2 de gauche à droite passe par le haut');
+});
+
+test('reprise : préambule cohérent', () => {
+  const lines = splitProgram('G21G90G55\nM3S12000\nG0Z5\nG0X10Y10\nG1Z-2F300\nG1X20F800\nG1Y20\n');
+  const r = buildResume(lines, 6);
+  assert.deepEqual(r.lines, ['G21', 'G90', 'G55', 'G17', 'G94', 'G0Z5', 'M3S12000', 'G4P3', 'G0X20Y10', 'G1Z-2F300', 'G1F800']);
+});
+
+test('job complet sur simulateur', async () => {
+  const { c, close } = await setup();
+  try {
+    const prog = ['G21G90', 'G10L20P1X0Y0Z0', 'G0Z2', ...Array.from({ length: 60 }, (_, i) => `G1X${i % 2 ? 5 : 0}Y${i * 0.5}F6000`), 'G0Z5', 'M30'].join('\n');
+    c.loadJob('test.nc', prog);
+    c.runJob(0);
+    await waitFor(() => c.job.state === 'done');
+    near(c.status.wpos.Z, 5, 0.01);
+    near(c.status.wpos.Y, 29.5, 0.01);
+  } finally { close(); }
+});
+
+test('changement d\'outil met le job en attente', async () => {
+  const { c, close } = await setup();
+  try {
+    c.loadJob('outil.nc', 'G21G90\nG0Z1\nT2M6\nG0Z3\n');
+    c.runJob(0);
+    await waitFor(() => c.job.state === 'toolchange');
+    assert.equal(c.job.tool, '2');
+    c.continueAfterToolChange();
+    await waitFor(() => c.job.state === 'done');
+  } finally { close(); }
+});
+
+test('erreur Grbl met le job en pause', async () => {
+  const { c, close } = await setup();
+  try {
+    c.loadJob('err.nc', 'G21\nG1X5\nG0X1\n'); // G1 sans F -> error:22
+    c.runJob(0);
+    await waitFor(() => c.job.state === 'paused');
+    assert.match(c.job.error, /error:22/);
+  } finally { close(); }
+});
+
+test('palpage Z, coin et centre', async () => {
+  const { c, close } = await setup();
+  try {
+    await c.cmd('G90G53G0X-140Y-130Z-40');
+    await c.sync();
+    await probeZ(c, { plate: 0 });
+    await c.nextStatus();
+    near(c.status.wco.Z, -50);
+
+    await c.cmd('G90G53G0X-210Y-190Z-40');
+    await c.sync();
+    const r = await probeCorner(c, { corner: 'FL', toolDia: 6 });
+    near(r.edgeX, -220);
+    near(r.edgeY, -200);
+    near(r.top, -50);
+    await c.nextStatus();
+    near(c.status.wco.X, -220);
+
+    await c.cmd('G90G53G0X-165Y-147Z-60');
+    await c.sync();
+    const h = await probeCenter(c, { toolDia: 6 });
+    near(h.center.X, -170);
+    near(h.center.Y, -150);
+    near(h.diameterX, 25, 0.05);
+  } finally { close(); }
+});
+
+test('palpage sans contact : erreur et alarme', async () => {
+  const { c, close } = await setup();
+  try {
+    await c.cmd('G90G53G0X-10Y-10Z-5');
+    await c.sync();
+    await assert.rejects(probeZ(c, { travel: 10 }), /Pas de contact/);
+    await c.nextStatus();
+    assert.equal(c.status.state, 'Alarm');
+  } finally { close(); }
+});
