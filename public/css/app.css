@@ -127,6 +127,7 @@ textarea { width: 100%; resize: vertical; font-family: var(--mono); font-size: 1
 .dro-axis.X { color: var(--x); } .dro-axis.Y { color: var(--y); } .dro-axis.Z { color: var(--z); }
 .dro-val { font-family: var(--mono); font-size: 28px; font-variant-numeric: tabular-nums; text-align: right; line-height: 1.1; }
 .dro-val small { display: block; font-size: 11px; color: var(--muted); }
+.origin-row { margin-top: 8px; }
 .dro-row > button { padding: 10px 10px; min-width: 64px; font-weight: 600; }
 .dro-num {
   font: inherit; background: transparent; border: 1px dashed transparent; border-radius: 6px;
@@ -237,6 +238,12 @@ input[type=range] { width: 100%; accent-color: var(--accent); padding: 0; border
 .probe-corners button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .check { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+.probe-manual { display: flex; flex-direction: column; gap: 10px; }
+.probe-manual .seg { margin-bottom: 0; flex-wrap: wrap; }
+.manual-moves { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.manual-moves button { padding: 14px 8px; font-size: 16px; font-weight: 700; }
+.manual-pos { font-family: var(--mono); font-size: 22px; text-align: center; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.manual-pos small { display: block; font-size: 11px; color: var(--muted); }
 .probe-result { background: color-mix(in srgb, var(--ok) 10%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); border-radius: 8px; padding: 10px; }
 .probe-result.err { background: color-mix(in srgb, var(--danger) 10%, transparent); border-color: color-mix(in srgb, var(--danger) 35%, transparent); }
 

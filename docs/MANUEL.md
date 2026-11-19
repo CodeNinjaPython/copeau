@@ -135,7 +135,7 @@ Une barre rouge sous le haut de l'écran explique l'alarme en cours. Alarmes fr�
 |---|---|
 | ← → | X− / X+ |
 | ↑ ↓ | Y+ / Y− |
-| Page ↑ / Page ↓ | Z+ / Z− |
+| + / − (ou Page ↑ / Page ↓) | Z+ / Z− |
 | Échap | Arrête tout déplacement |
 
 Même règle : appui court = un pas, appui maintenu = continu. Les flèches ne déplacent pas la machine quand vous tapez dans un champ de saisie.
@@ -165,7 +165,12 @@ Cliquez sur le chiffre d'un axe : il devient un champ. Tapez la valeur que la po
 
 *Exemple :* l'outil touche le dessus d'une cale de 20 mm posée sur la pièce. Tapez `20` dans Z : le Z0 se retrouve sur le dessus de la pièce.
 
-**→ X0 Y0** ramène l'outil au-dessus de l'origine (à la hauteur actuelle : remontez d'abord si besoin).
+### Revenir à l'origine
+
+- **⌂ Origine** ramène l'outil exactement au zéro établi. Il monte d'abord à la hauteur de survol (onglet Zone, 5 mm par défaut) s'il est plus bas, rejoint X0 Y0, puis descend lentement jusqu'à Z0 (300 mm/min au plus). Pratique pour vérifier un zéro avant de lancer.
+- **→ X0 Y0** fait la même chose sans descendre : l'outil s'arrête au-dessus de l'origine, à la hauteur de survol.
+
+Les deux passent par le jog : **Échap** ou **■** arrêtent le mouvement à tout moment.
 
 Le zéro est enregistré dans la carte (repère `G54` par défaut) et survit à une coupure.
 
@@ -207,6 +212,19 @@ Pose X0 Y0 au centre d'un alésage.
 1. Descendez l'outil **dans le trou**, sous le bord, à peu près au centre.
 2. Indiquez le diamètre de l'outil et le rayon maximal du trou.
 3. Lancez. Copeau palpe les deux côtés en X, se centre, fait de même en Y, puis repalpe X pour la précision. Le résultat affiche le diamètre mesuré.
+
+### Sans sonde (méthode de la feuille)
+
+Sans sonde électrique, Copeau guide la méthode classique de la feuille de papier.
+
+1. Onglet **Palpage**, choisissez **Sans sonde**.
+2. Choisissez ce que vous palpez : **Dessus Z**, **Bord gauche**, **Bord droit**, **Bord avant** ou **Bord arrière**.
+3. Indiquez l'**épaisseur de la feuille** (environ 0,1 mm pour du papier ordinaire, ou l'épaisseur exacte d'une cale) et, pour un bord, le **diamètre de l'outil**.
+4. Broche **à l'arrêt**, glissez la feuille entre l'outil et la pièce.
+5. Approchez avec le gros bouton (**▼ Descendre** ou **→ Approcher**) : d'abord en pas de 0,5 ou 1 mm, puis en **0,01 mm** quand la feuille commence à frotter. Les touches **+ / −** et les flèches marchent aussi.
+6. Quand la feuille se coince, cliquez **✓ Contact**.
+
+Copeau pose l'origine en retranchant l'épaisseur de la feuille (et le rayon de l'outil pour un bord), puis dégage l'outil de 2 mm (désactivable). Pour un coin, faites le dessus, puis un bord X, puis un bord Y.
 
 Le bouton **Palper Z** de la fenêtre de changement d'outil lance un palpage Z avec les derniers réglages utilisés.
 
@@ -414,7 +432,8 @@ Tous les écrans ouverts voient et commandent **la même machine** en temps rée
 | Touche | Action |
 |---|---|
 | ← → ↑ ↓ | Jog X / Y (court = un pas, maintenu = continu) |
-| Page ↑ / Page ↓ | Jog Z |
+| + / − ou Page ↑ / Page ↓ | Jog Z (rangée principale ou pavé numérique) |
+| Espace | Lecture / pause de la simulation |
 | Échap | Arrête le jog ou le parcours, ferme la bulle *Aller ici*, annule un tracé |
 | Entrée | Valide une valeur saisie (position, zone) |
 | ↑ / ↓ dans la console | Historique des commandes |

@@ -221,6 +221,7 @@ function renderMachine() {
   if (alarm) bar.textContent = `${bar.dataset.text || 'Machine en alarme'}. Faites l'origine ($H) ou déverrouillez ($X) si la position est sûre.`;
 
   viewer.setTool(s.wpos);
+  updateManualPos();
   const wcoKey = `${s.wco?.X},${s.wco?.Y},${s.wco?.Z}`;
   if (wcoKey !== lastWcoKey) { lastWcoKey = wcoKey; renderZones(); }
   updateEnabled();
@@ -233,7 +234,7 @@ function updateEnabled() {
   const jobActive = ['running', 'paused', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
   const canJog = m.ready && (state === 'Idle' || state === 'Jog') && !(jobActive && S.job.state !== 'toolchange');
   $$('[data-jog], #jog-stop').forEach((b) => (b.disabled = !canJog));
-  $$('[data-zero], [data-edit], #btn-goto-zero').forEach((b) => (b.disabled = !idle || (jobActive && S.job.state !== 'toolchange')));
+  $$('[data-zero], [data-edit], #btn-goto-zero, #btn-goto-origin').forEach((b) => (b.disabled = !idle || (jobActive && S.job.state !== 'toolchange')));
   $('#btn-unlock').disabled = !m.ready;
   $('#btn-home').disabled = !m.ready || jobActive;
   $('#btn-reset').disabled = !m.connected;
@@ -268,7 +269,17 @@ document.addEventListener('click', (e) => {
   const r = e.target.closest('[data-rt]');
   if (r) rt(r.dataset.rt);
 });
-$('#btn-goto-zero').onclick = () => cmd('G90G0X0Y0');
+// → X0 Y0 : au-dessus de l'origine, après montée au Z de survol si besoin.
+$('#btn-goto-zero').onclick = () => {
+  act('jogTo', { X: 0, Y: 0, liftZ: safeZ(), feed: Number($('#jog-feed').value) }).catch(() => {});
+};
+// ⌂ Origine : retour complet au zéro établi (X0 Y0 puis Z0, descente lente).
+$('#btn-goto-origin').onclick = () => {
+  const w = S.machine.status.wco || {};
+  if (!w.X && !w.Y && !w.Z && !confirm('Aucun zéro ne semble défini : l\'origine est celle de la machine (0, 0, 0).\n\nY aller quand même ?')) return;
+  toast('Retour à l\'origine… Échap pour arrêter');
+  act('gotoOrigin', { liftZ: safeZ(), feed: Number($('#jog-feed').value), plungeFeed: 300 }).catch(() => {});
+};
 
 let jogStep = store.get('jogStep', 1);
 function renderSteps() {
@@ -323,9 +334,17 @@ for (const b of $$('[data-jog]')) {
 }
 $('#jog-stop').onclick = () => act('jogStop').catch(() => {});
 
-const KEYS = { ArrowLeft: { X: -1 }, ArrowRight: { X: 1 }, ArrowUp: { Y: 1 }, ArrowDown: { Y: -1 }, PageUp: { Z: 1 }, PageDown: { Z: -1 } };
-const KEY_BUTTON = { ArrowLeft: 'X-1', ArrowRight: 'X1', ArrowUp: 'Y1', ArrowDown: 'Y-1', PageUp: 'Z1', PageDown: 'Z-1' };
+// + / − (rangée principale ou pavé numérique) pilotent Z comme PgUp / PgDn.
+// « = » compte comme « + » : c'est la même touche sans Maj.
+const KEYS = {
+  ArrowLeft: { X: -1 }, ArrowRight: { X: 1 }, ArrowUp: { Y: 1 }, ArrowDown: { Y: -1 },
+  PageUp: { Z: 1 }, PageDown: { Z: -1 }, '+': { Z: 1 }, '=': { Z: 1 }, '-': { Z: -1 },
+};
+const KEY_BUTTON = { ArrowLeft: 'X-1', ArrowRight: 'X1', ArrowUp: 'Y1', ArrowDown: 'Y-1', PageUp: 'Z1', PageDown: 'Z-1', '+': 'Z1', '=': 'Z1', '-': 'Z-1' };
+// Touches enfoncées, indexées par touche physique (e.code) : avec Maj, « + »
+// peut se relâcher en « = », il faut quand même arrêter le bon jog.
 const keyJoggers = {};
+const heldKeys = {};
 // Seuls les champs de saisie gardent les flèches ; un menu ou un bouton qui a
 // le focus ne doit pas empêcher de déplacer la machine.
 const typing = (e) => e.target.tagName === 'TEXTAREA' ||
@@ -349,19 +368,29 @@ document.addEventListener('keydown', (e) => {
   if (!KEYS[e.key] || typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
   e.preventDefault();
   if (e.target.tagName === 'SELECT') e.target.blur();
-  if (e.repeat) return;
+  if (e.repeat || heldKeys[e.code]) return;
   if ($('#jog-stop').disabled) { toastOnce(jogBlockedReason()); return; }
-  $(`[data-jog="${KEY_BUTTON[e.key]}"]`)?.classList.add('active');
-  (keyJoggers[e.key] ||= makeJogger()).press(KEYS[e.key]);
+  const held = { key: e.key, jogger: (keyJoggers[e.code] ||= makeJogger()) };
+  heldKeys[e.code] = held;
+  $(`[data-jog="${KEY_BUTTON[held.key]}"]`)?.classList.add('active');
+  held.jogger.press(KEYS[held.key]);
 });
 document.addEventListener('keyup', (e) => {
-  if (!keyJoggers[e.key]) return;
-  $(`[data-jog="${KEY_BUTTON[e.key]}"]`)?.classList.remove('active');
-  keyJoggers[e.key].release(KEYS[e.key]);
+  const held = heldKeys[e.code];
+  if (!held) return;
+  delete heldKeys[e.code];
+  $(`[data-jog="${KEY_BUTTON[held.key]}"]`)?.classList.remove('active');
+  held.jogger.release(KEYS[held.key]);
 });
 // Après un choix dans un menu, on rend le focus à la page pour le clavier.
 $$('select').forEach((sel) => sel.addEventListener('change', () => sel.blur()));
-window.addEventListener('blur', () => act('jogStop').catch(() => {}));
+window.addEventListener('blur', () => {
+  for (const code of Object.keys(heldKeys)) {
+    $(`[data-jog="${KEY_BUTTON[heldKeys[code].key]}"]`)?.classList.remove('active');
+    delete heldKeys[code];
+  }
+  act('jogStop').catch(() => {});
+});
 
 // ---- Visualiseur & job ------------------------------------------------------
 
@@ -612,11 +641,13 @@ const PROBE_HELP = {
   z: 'Placez l\'outil 5 à 20 mm au-dessus de la pièce (ou de la cale). Copeau palpe deux fois (rapide puis fin) et pose Z0 sur le dessus de la pièce.',
   corner: 'Placez l\'outil au-dessus de la pièce, à la distance indiquée des deux bords du coin choisi. Copeau palpe Z, puis X et Y sur les flancs, et pose X0 Y0 Z0 sur le coin.',
   center: 'Descendez l\'outil dans le trou, sous le bord, à peu près au centre. Copeau palpe ±X, ±Y puis ±X à nouveau et pose X0 Y0 au centre.',
+  manual: 'Méthode de la feuille de papier, sans sonde : glissez une feuille entre l\'outil et la pièce, approchez par petits pas jusqu\'à ce qu\'elle frotte, puis cliquez « Contact ». Broche à l\'arrêt, outil tourné à la main.',
 };
 let probeKind = 'z';
 let probeCorner = store.get('probeCorner', 'FL');
 
 function probeValues(kind) {
+  if (!PROBE_FIELDS[kind]) return {};
   const saved = store.get(`probe.${kind}`, {});
   const out = {};
   for (const [k, , d] of PROBE_FIELDS[kind]) out[k] = saved[k] ?? d;
@@ -627,6 +658,11 @@ function probeValues(kind) {
 function renderProbe() {
   $$('#probe-kind button').forEach((b) => b.classList.toggle('active', b.dataset.kind === probeKind));
   $('#probe-help').textContent = PROBE_HELP[probeKind];
+  const manual = probeKind === 'manual';
+  $('#probe-manual').hidden = !manual;
+  $('#probe-auto').hidden = manual;
+  $('#probe-fields').hidden = manual;
+  if (manual) { $('#probe-corners').hidden = true; $('#probe-result').hidden = true; renderManual(); return; }
   $('#probe-corners').hidden = probeKind !== 'corner';
   $$('#probe-corners button').forEach((b) => b.classList.toggle('active', b.dataset.corner === probeCorner));
   const vals = probeValues(probeKind);
@@ -641,6 +677,100 @@ $('#probe-fields').oninput = () => {
   store.set(`probe.${probeKind}`, v);
 };
 renderProbe();
+
+// ---- Palpage sans sonde (méthode de la feuille) -------------------------------
+// On approche à la main par petits pas ; au contact, la position actuelle
+// devient : épaisseur de la feuille (Z) ou -(rayon + feuille) côté approche (X/Y).
+
+const MANUAL_SIDES = {
+  Z: { label: 'Dessus Z', axis: 'Z', dir: -1, radius: false, approach: '▼ Descendre', away: '▲ Monter',
+    help: 'Outil au-dessus de la pièce, feuille posée dessous. Descendez jusqu\'à ce que la feuille frotte.' },
+  XL: { label: 'Bord gauche', axis: 'X', dir: 1, radius: true, approach: '→ Approcher', away: '← Reculer',
+    help: 'Outil à gauche de la pièce, sous le dessus. Approchez vers la droite jusqu\'à coincer la feuille contre le bord.' },
+  XR: { label: 'Bord droit', axis: 'X', dir: -1, radius: true, approach: '← Approcher', away: '→ Reculer',
+    help: 'Outil à droite de la pièce, sous le dessus. Approchez vers la gauche jusqu\'à coincer la feuille.' },
+  YF: { label: 'Bord avant', axis: 'Y', dir: 1, radius: true, approach: '↑ Approcher', away: '↓ Reculer',
+    help: 'Outil devant la pièce, sous le dessus. Approchez vers l\'arrière jusqu\'à coincer la feuille.' },
+  YB: { label: 'Bord arrière', axis: 'Y', dir: -1, radius: true, approach: '↓ Approcher', away: '↑ Reculer',
+    help: 'Outil derrière la pièce, sous le dessus. Approchez vers l\'avant jusqu\'à coincer la feuille.' },
+};
+const manualState = { side: 'Z', paper: 0.1, toolDia: 6, step: 0.1, retract: true, ...store.get('probe.manualState', {}) };
+const saveManual = () => store.set('probe.manualState', manualState);
+
+function renderManual() {
+  const m = manualState;
+  const side = MANUAL_SIDES[m.side] || MANUAL_SIDES.Z;
+  const steps = [0.01, 0.05, 0.1, 0.5, 1];
+  $('#probe-manual').innerHTML = `
+    <div class="seg">${Object.entries(MANUAL_SIDES).map(([k, s]) =>
+      `<button data-mside="${k}" class="${k === m.side ? 'active' : ''}">${s.label}</button>`).join('')}</div>
+    <p class="muted small">${side.help}</p>
+    <div class="grid2">
+      <label class="field"><span>Épaisseur feuille / cale (mm) ${ibtn('pf-paper')}</span><input type="number" step="any" min="0" data-mfield="paper" value="${m.paper}"></label>
+      ${side.radius ? `<label class="field"><span>Diamètre outil (mm) ${ibtn('pf-toolDia')}</span><input type="number" step="any" min="0" data-mfield="toolDia" value="${m.toolDia}"></label>` : '<span></span>'}
+    </div>
+    <div class="section-title"><span>Pas d'approche ${ibtn('pf-mstep')}</span></div>
+    <div class="seg">${steps.map((v) => `<button data-mstep="${v}" class="${v === m.step ? 'active' : ''}">${v}</button>`).join('')}</div>
+    <div class="manual-pos" id="manual-pos"></div>
+    <div class="manual-moves">
+      <button class="primary" data-mmove="1">${side.approach}</button>
+      <button class="ghost" data-mmove="-1">${side.away}</button>
+    </div>
+    <label class="check small"><input type="checkbox" data-mretract ${m.retract ? 'checked' : ''}> Dégager de 2 mm après le contact</label>
+    <button class="primary block" data-mcontact>✓ Contact : poser ${side.axis}0</button>
+    <div class="probe-result" id="manual-result" hidden></div>`;
+  updateManualPos();
+}
+
+function updateManualPos() {
+  const el = $('#manual-pos');
+  if (!el || $('#probe-manual').hidden) return;
+  const side = MANUAL_SIDES[manualState.side];
+  const v = S.machine.status.wpos[side.axis];
+  el.innerHTML = `${side.axis} ${v.toFixed(3)}<small>position travail actuelle</small>`;
+}
+
+function manualContactValue() {
+  const side = MANUAL_SIDES[manualState.side];
+  const r = side.radius ? manualState.toolDia / 2 : 0;
+  return r3(-side.dir * (r + manualState.paper));
+}
+
+$('#probe-manual').addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.disabled) return;
+  const m = manualState;
+  const side = MANUAL_SIDES[m.side];
+  if (b.dataset.mside) { m.side = b.dataset.mside; saveManual(); renderManual(); return; }
+  if (b.dataset.mstep) { m.step = Number(b.dataset.mstep); saveManual(); renderManual(); return; }
+  if ($('#jog-stop').disabled) return toastOnce(jogBlockedReason());
+  const feed = Math.min(Number($('#jog-feed').value) || 300, 300);
+  if (b.dataset.mmove) {
+    act('jog', { axes: { [side.axis]: side.dir * Number(b.dataset.mmove) * m.step }, feed }).catch(() => {});
+    return;
+  }
+  if ('mcontact' in b.dataset) {
+    const value = manualContactValue();
+    await act('cmd', { line: `G10L20P0${side.axis}${value}` }).catch(() => {});
+    const msg = `${side.axis} posé : la position actuelle vaut ${side.axis} ${value} (${side.radius ? `rayon ${r3(m.toolDia / 2)} + ` : ''}feuille ${m.paper} mm), donc ${side.axis}0 est sur ${side.axis === 'Z' ? 'le dessus de la pièce' : 'le bord'}.`;
+    const box = $('#manual-result');
+    box.hidden = false;
+    box.className = 'probe-result';
+    box.textContent = msg;
+    toast(`${side.axis}0 posé (méthode de la feuille)`, 'ok');
+    if (m.retract) act('jog', { axes: { [side.axis]: -side.dir * 2 }, feed }).catch(() => {});
+  }
+});
+$('#probe-manual').addEventListener('change', (e) => {
+  const t = e.target;
+  if (t.dataset.mfield) {
+    const v = Number(t.value);
+    if (Number.isFinite(v) && v >= 0) { manualState[t.dataset.mfield] = v; saveManual(); }
+  } else if ('mretract' in t.dataset) {
+    manualState.retract = t.checked;
+    saveManual();
+  }
+});
 
 async function runProbe(kind, params) {
   const box = $('#probe-result');
@@ -871,7 +1001,7 @@ function drawShape(first, second) {
 function setHint() {
   const hint = $('#viewer-hint');
   hint.classList.toggle('drawing', !!draw);
-  if (!draw) { hint.textContent = 'Cliquez sur le plateau pour y amener la tête · flèches / PgUp / PgDn pour déplacer · Échap = stop'; return; }
+  if (!draw) { hint.textContent = 'Cliquez sur le plateau pour y amener la tête · flèches = X/Y · + / − = Z · Échap = stop'; return; }
   const what = draw.target === 'table' ? 'du plateau' : 'de la zone';
   hint.textContent = draw.kind === 'circle'
     ? (draw.first ? `Cliquez un point du bord ${what} (Échap pour annuler)` : `Cliquez le centre ${what}`)
@@ -1146,7 +1276,7 @@ const TOUR = [
   {
     target: '.jog', title: 'Déplacer la tête',
     body: `<p><b>Appui court</b> = un pas de la taille choisie, <b>appui maintenu</b> = mouvement continu jusqu'au relâchement.</p>
-      <p>Au clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> pour X/Y, <kbd>PgUp</kbd><kbd>PgDn</kbd> pour Z, <kbd>Échap</kbd> pour arrêter.</p>`,
+      <p>Au clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> pour X/Y, <kbd>+</kbd><kbd>−</kbd> ou <kbd>PgUp</kbd><kbd>PgDn</kbd> pour Z, <kbd>Échap</kbd> pour arrêter.</p>`,
   },
   {
     target: '.viewer-wrap', title: 'Vue 3D et suivi en temps réel',
@@ -1348,7 +1478,7 @@ const INFO = {
     <p><b>Ligne M</b> : position machine, par rapport aux fins de course. Elle ne change pas quand on refait le zéro.</p>
     <p><b>X = 0</b> pose le zéro à la position actuelle. <b>Cliquez un chiffre</b> pour taper une valeur, par exemple 20 si l'outil est posé sur une cale de 20 mm. Le zéro reste mémorisé dans la carte.</p>` },
   jog: { title: 'Déplacer la tête', html: `<p><b>Appui court</b> : un pas de la taille choisie. <b>Appui maintenu</b> : mouvement continu jusqu'au relâchement.</p>
-    <p>Clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> X/Y, <kbd>PgUp</kbd><kbd>PgDn</kbd> Z, <kbd>Échap</kbd> stop.</p>
+    <p>Clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> X/Y, <kbd>+</kbd><kbd>−</kbd> ou <kbd>PgUp</kbd><kbd>PgDn</kbd> Z, <kbd>Échap</kbd> stop.</p>
     <p>Bloqué en alarme et pendant l'usinage. Si l'écran perd la connexion, le mouvement s'arrête.</p>` },
   jogFeed: { title: 'Vitesse jog', html: `<p>Vitesse des déplacements manuels, en mm/min. 2000 convient en général ; réduisez près de la pièce.</p><p>Grbl la plafonne à la vitesse max de chaque axe ($110 à $112).</p>` },
   overrides: { title: 'Corrections en direct', html: `<p>Agissent tout de suite, même pendant l'usinage, <b>sans modifier le fichier</b>.</p>
@@ -1381,6 +1511,8 @@ const INFO = {
   'pf-wall': { html: `<p>Avec une cale d'angle : épaisseur de sa paroi entre l'outil et la pièce. <b>0</b> si l'outil touche directement les flancs.</p>` },
   'pf-inset': { html: `<p>Distance approximative entre l'outil et chaque bord du coin au départ. L'outil sortira de cette distance + son rayon + 5 mm avant de redescendre.</p>` },
   'pf-depth': { html: `<p>Profondeur sous le dessus de la pièce à laquelle les flancs X et Y sont palpés.</p>` },
+  'pf-paper': { html: `<p>Épaisseur de ce que vous glissez sous l'outil : une feuille de papier ordinaire fait environ <b>0,1 mm</b>. Avec une cale étalon, son épaisseur exacte. Copeau la retranche pour que le zéro soit sur la pièce.</p>` },
+  'pf-mstep': { html: `<p>Distance de chaque clic d'approche. Approchez en 0,5 ou 1 mm, puis finissez en <b>0,01</b> quand la feuille commence à frotter.</p><p>Les touches <kbd>+</kbd> / <kbd>−</kbd> et les flèches marchent aussi, avec le pas du jog.</p>` },
   'pf-maxRadius': { html: `<p>Rayon maximal attendu du trou : course de palpage dans chaque direction depuis le départ.</p>` },
   table: { title: 'Plateau · course machine', html: `<p>La <b>taille de travail maximale</b> de la CNC : la course de chaque axe, X × Y × Z.</p>
     <p>Elle est dessinée en 3D. Copeau vérifie que le programme ne sort pas de cette course (y compris en Z) et refuse un « Aller ici » en dehors.</p>
@@ -1395,6 +1527,9 @@ const INFO = {
     <p>Copeau vérifie que le programme tient dedans. <b>Parcourir le contour</b> fait le tour à la hauteur de survol : pratique pour vérifier le bridage.</p>` },
   fit: { title: 'Vérification', html: `<p>Compare le cadre du programme (avec le zéro actuel) au plateau, à la course Z et à la zone de travail.</p>
     <p>Rouge : le programme dépasse. Copeau demandera confirmation au démarrage.</p>` },
+  origin: { title: 'Revenir à l\'origine', html: `<p><b>⌂ Origine</b> ramène l'outil exactement au zéro établi : il monte d'abord à la hauteur de survol (onglet Zone) s'il est plus bas, rejoint X0 Y0, puis <b>descend lentement jusqu'à Z0</b> (300 mm/min au plus).</p>
+    <p><b>→ X0 Y0</b> s'arrête au-dessus de l'origine, à la hauteur de survol, sans descendre.</p>
+    <p>Pratique pour vérifier un zéro avant de lancer. <kbd>Échap</kbd> ou ■ arrête le mouvement.</p>` },
   safeZ: { title: 'Hauteur de survol', html: `<p>Hauteur (Z travail) à laquelle la tête monte avant « Aller ici » et les parcours de contour. Elle doit dépasser les brides et la pièce.</p>` },
   macros: { title: 'Macros', html: `<p>Une commande par ligne (G-code ou $), exécutées dans l'ordre comme si vous les tapiez dans la console.</p>
     <p>Enregistrées sur l'ordinateur qui fait tourner Copeau (<code>data/macros.json</code>).</p>` },

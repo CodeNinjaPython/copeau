@@ -53,12 +53,16 @@
         <div class="row gap">
           <button data-zero="XYZ" class="ghost grow">Zéro XYZ</button>
           <button data-zero="XY" class="ghost grow">Zéro XY</button>
-          <button id="btn-goto-zero" class="ghost grow" title="Aller à X0 Y0">→ X0 Y0</button>
+        </div>
+        <div class="row gap origin-row">
+          <button id="btn-goto-origin" class="primary grow" title="Revenir au zéro établi : X0 Y0 puis Z0">⌂ Origine</button>
+          <button id="btn-goto-zero" class="ghost grow" title="Aller au-dessus de X0 Y0 sans descendre">→ X0 Y0</button>
+          <button type="button" class="ibtn" data-info="origin" aria-label="Plus d'informations" aria-expanded="false">i</button>
         </div>
       </div>
 
       <div class="jog">
-        <div class="section-title"><span>Déplacement <button type="button" class="ibtn" data-info="jog" aria-label="Plus d'informations" aria-expanded="false">i</button></span><span class="muted small">flèches · PgUp/PgDn · maintenir = continu</span></div>
+        <div class="section-title"><span>Déplacement <button type="button" class="ibtn" data-info="jog" aria-label="Plus d'informations" aria-expanded="false">i</button></span><span class="muted small">flèches · + / − · maintenir = continu</span></div>
         <div class="jog-grid">
           <button data-jog="X-1 Y1" class="jog-btn diag">↖</button>
           <button data-jog="Y1" class="jog-btn">Y+</button>
@@ -130,7 +134,7 @@
           <button id="place-cancel" class="ghost" title="Annuler (Échap)">✕</button>
         </div>
       </div>
-      <div class="viewer-hint muted small" id="viewer-hint">Cliquez sur le plateau pour y amener la tête · flèches / PgUp / PgDn pour déplacer · Échap = stop</div>
+      <div class="viewer-hint muted small" id="viewer-hint">Cliquez sur le plateau pour y amener la tête · flèches = X/Y · + / − = Z · Échap = stop</div>
       <div class="playbar" id="playbar" hidden>
         <button id="pb-play" class="primary pb-btn" title="Lecture / pause (Espace)">▶</button>
         <button id="pb-restart" class="ghost pb-btn" title="Revenir au début">⏮</button>
@@ -207,6 +211,7 @@
           <button data-kind="z" class="active">Z</button>
           <button data-kind="corner">Coin XYZ</button>
           <button data-kind="center">Centre de trou</button>
+          <button data-kind="manual">Sans sonde</button>
         </div>
         <p class="muted small" id="probe-help"></p>
         <div class="probe-corners" id="probe-corners" hidden>
@@ -214,8 +219,11 @@
           <button data-corner="FL" class="active">↙ Av. gauche</button><button data-corner="FR">↘ Av. droit</button>
         </div>
         <div class="grid2" id="probe-fields"></div>
+        <div class="probe-manual" id="probe-manual" hidden></div>
+        <div id="probe-auto">
         <label class="check"><input type="checkbox" id="probe-confirm"> La sonde est branchée et testée (pince sur l'outil) <button type="button" class="ibtn" data-info="probe" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
         <button id="btn-probe" class="primary block">Lancer le palpage</button>
+        </div>
         <div id="probe-result" class="probe-result" hidden></div>
       </div>
 

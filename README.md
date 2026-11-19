@@ -27,7 +27,7 @@ Attention : n'importe qui sur ce réseau peut alors commander la machine.
 ## Fonctions
 
 - **Position** travail et machine, zéro par axe, retour X0 Y0.
-- **Jog** : appui court = un pas, appui maintenu = mouvement continu jusqu'au relâchement. Clavier : flèches (X/Y), PgUp/PgDn (Z). Le jog s'arrête si l'écran se déconnecte.
+- **Jog** : appui court = un pas, appui maintenu = mouvement continu jusqu'au relâchement. Clavier : flèches (X/Y), + / − ou PgUp/PgDn (Z). Le jog s'arrête si l'écran se déconnecte.
 - **Visualiseur 3D** du parcours d'outil avec suivi en temps réel : position de l'outil, partie usinée en orange, temps restant.
 - **Simuler** avant de lancer : lecture animée de l'usinage avec enlèvement de matière, curseur, vitesse 1× à 100×.
 - **Placer** : glisser le parcours sur le plateau, l'origine X/Y est décalée d'autant.
@@ -37,7 +37,8 @@ Attention : n'importe qui sur ce réseau peut alors commander la machine.
 - **Erreur Grbl pendant un job** : le job se met en pause au lieu de continuer.
 - **Changement d'outil (M6)** : le job attend la fin des mouvements, affiche l'outil demandé et propose de refaire le Z.
 - **Reprise de job** à une ligne choisie (champ, curseur ou clic sur le parcours 3D) : modes restaurés, broche relancée, approche par le Z de sécurité.
-- **Palpage** : Z (avec cale), coin XYZ (4 coins), centre de trou. Palpage rapide puis fin, origine posée avec `G10 L2`.
+- **Palpage** : Z (avec cale), coin XYZ (4 coins), centre de trou. **Sans sonde** : méthode de la feuille de papier guidée pas à pas.
+- **⌂ Origine** : retour au zéro établi (montée de sécurité, X0 Y0, descente lente à Z0). Palpage rapide puis fin, origine posée avec `G10 L2`.
 - **Corrections en direct** : avance, broche, rapides.
 - **Macros** enregistrées dans `data/macros.json`.
 - **Réglages Grbl ($$)** lisibles et modifiables avec leur description en français.
