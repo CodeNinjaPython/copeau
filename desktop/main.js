@@ -23,7 +23,11 @@ if (!app.requestSingleInstanceLock()) {
       : path.join(app.getPath('userData'), 'data');
 
     try {
-      server = await startServer({ port: 0, host: '127.0.0.1' });
+      server = await startServer({
+        port: 0,
+        host: '127.0.0.1',
+        threeAddonsDir: path.join(process.resourcesPath, 'three-addons'),
+      });
       const address = server.address();
       mainWindow = new BrowserWindow({
         width: 1440,

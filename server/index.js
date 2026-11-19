@@ -18,10 +18,11 @@ const DATA_DIR = path.resolve(process.env.COPEAU_DATA_DIR || path.join(root, 'da
 const MACROS_FILE = path.join(DATA_DIR, 'macros.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const SIMULATOR = 'simulateur';
+const THREE_DIR = path.join(root, 'node_modules/three');
 
 const app = express();
 app.use(express.static(path.join(root, 'public')));
-app.use('/vendor/three', express.static(path.join(root, 'node_modules/three')));
+app.use('/vendor/three', express.static(THREE_DIR));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 * 1024 });
 
@@ -250,7 +251,8 @@ wss.on('connection', (ws) => {
   ws.on('close', () => { if (ws.jogging) grbl.realtime('jogCancel'); });
 });
 
-export function startServer({ port = PORT, host = HOST } = {}) {
+export function startServer({ port = PORT, host = HOST, threeAddonsDir } = {}) {
+  if (threeAddonsDir) app.use('/vendor/three/examples/jsm', express.static(threeAddonsDir));
   return new Promise((resolve, reject) => {
     const onError = (error) => {
       server.off('listening', onListening);

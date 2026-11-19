@@ -31,6 +31,12 @@
     "asarUnpack": [
       "**/*.node"
     ],
+    "extraResources": [
+      {
+        "from": "node_modules/three/examples/jsm/controls/OrbitControls.js",
+        "to": "three-addons/controls/OrbitControls.js"
+      }
+    ],
     "win": {
       "target": "portable",
       "artifactName": "Copeau-Portable-${version}.${ext}"
