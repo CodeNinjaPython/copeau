@@ -40,7 +40,7 @@ Attention : n'importe qui sur ce réseau peut alors commander la machine.
 ## Fonctions
 
 - **Position** travail et machine, zéro par axe, retour X0 Y0.
-- **Jog** : appui = un pas, appui maintenu = le pas répété (1, 1, 1… ou 10, 10, 10…), arrêt sur un multiple du pas. Clavier : flèches (X/Y), + / − ou PgUp/PgDn (Z). Le jog s'arrête si l'écran se déconnecte.
+- **Jog** : appui = un pas, appui maintenu = le pas répété (1, 1, 1… ou 10, 10, 10…), arrêt immédiat au relâchement. Clavier : flèches (X/Y), + / − ou PgUp/PgDn (Z). Le jog s'arrête si l'écran se déconnecte.
 - **Visualiseur 3D** du parcours d'outil avec suivi en temps réel : position de l'outil, partie usinée en orange, temps restant.
 - **Simuler** avant de lancer : lecture animée de l'usinage avec enlèvement de matière, curseur, vitesse 1× à 100×.
 - **Placer** : glisser le parcours sur le plateau, l'origine X/Y est décalée d'autant.

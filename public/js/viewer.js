@@ -164,13 +164,34 @@ export class Viewer {
     major.position.z = 0.01;
   }
 
-  // La grille couvre le programme, le plateau et la zone.
+  // La grille est fixée à la machine (centrée sur son origine) et couvre le
+  // programme, le plateau et la zone.
   fitGrid() {
+    const w = this.wco || { X: 0, Y: 0 };
     let ext = 0;
     for (const b of [this.box, this.shapesBox]) {
-      if (b) ext = Math.max(ext, Math.abs(b.min.x), Math.abs(b.max.x), Math.abs(b.min.y), Math.abs(b.max.y));
+      if (b) ext = Math.max(ext, Math.abs(b.min.x + w.X), Math.abs(b.max.x + w.X), Math.abs(b.min.y + w.Y), Math.abs(b.max.y + w.Y));
     }
+    this.grid.position.set(-w.X, -w.Y, 0);
     if (ext) this.setGrid(ext + 20);
+  }
+
+  // La scène est dessinée en coordonnées travail. Quand l'origine change
+  // (X = 0, palpage…), ce qui est fixe sur la machine (outil, grille, plateau)
+  // bougerait à l'écran. On déplace la caméra d'autant : l'outil reste
+  // immobile et c'est l'origine, avec le programme, qui vient se placer.
+  setWorkOffset(w) {
+    if (!w) return;
+    if (!this.wco) { this.wco = { ...w }; this.fitGrid(); return; }
+    const d = { x: w.X - this.wco.X, y: w.Y - this.wco.Y, z: w.Z - this.wco.Z };
+    if (Math.abs(d.x) + Math.abs(d.y) + Math.abs(d.z) < 1e-6) return;
+    this.wco = { ...w };
+    const shift = new THREE.Vector3(-d.x, -d.y, -d.z);
+    this.camera.position.add(shift);
+    this.controls.target.add(shift);
+    this.controls.update();
+    this.fitGrid();
+    this.render();
   }
 
   load(lines) {

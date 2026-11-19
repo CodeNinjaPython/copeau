@@ -221,6 +221,7 @@ function renderMachine() {
   bar.hidden = !alarm;
   if (alarm) bar.textContent = `${bar.dataset.text || 'Machine en alarme'}. Faites l'origine ($H) ou déverrouillez ($X) si la position est sûre.`;
 
+  viewer.setWorkOffset(s.wco);
   viewer.setTool(s.wpos);
   updateManualPos();
   const wcoKey = `${s.wco?.X},${s.wco?.Y},${s.wco?.Z}`;
@@ -235,7 +236,10 @@ function updateEnabled() {
   const jobActive = ['running', 'paused', 'spinup', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
   const canJog = m.ready && (state === 'Idle' || state === 'Jog') && !(jobActive && S.job.state !== 'toolchange');
   $$('[data-jog], #jog-stop').forEach((b) => (b.disabled = !canJog));
-  $$('[data-zero], [data-edit], [data-axis-home], #btn-goto-zero, #btn-goto-origin').forEach((b) => (b.disabled = !idle || (jobActive && S.job.state !== 'toolchange')));
+  // Zéros grisés tant qu'un jog se termine : un zéro posé en plein arrêt
+  // tomberait à côté de la position finale.
+  const settled = idle && !jogSettling;
+  $$('[data-zero], [data-edit], [data-axis-home], #btn-goto-zero, #btn-goto-origin').forEach((b) => (b.disabled = !settled || (jobActive && S.job.state !== 'toolchange')));
   $('#btn-unlock').disabled = !m.ready;
   $('#btn-home').disabled = !m.ready || jobActive;
   $('#btn-reset').disabled = !m.connected;
@@ -321,12 +325,10 @@ const parseJog = (spec) => Object.fromEntries(spec.split(' ').map((p) => [p[0], 
 
 // Appui = un pas de la taille choisie. Appui maintenu = le même pas répété
 // (1, 1, 1… ou 10, 10, 10…) au rythme où la machine le parcourt, avec un pas
-// d'avance pour un mouvement fluide. Au relâchement, ce pas d'avance est
-// annulé et la tête finit seulement le pas en cours : elle s'arrête au
-// prochain multiple du pas, au plus près de l'endroit où l'on a lâché.
-// ■ ou Échap arrêtent net.
+// d'avance pour un mouvement fluide. Au relâchement, arrêt immédiat là où se
+// trouve la tête (jog cancel). ■ ou Échap arrêtent aussi net.
 function makeJogger() {
-  let holdTimer = null, repeatTimer = null, dir = null, start = null, step = 1, snapping = false;
+  let holdTimer = null, repeatTimer = null, dir = null, step = 1, stopping = false;
   const feed = () => Number($('#jog-feed').value) || 1000;
   const stepOnce = () => {
     const axes = Object.fromEntries(Object.entries(dir).map(([a, v]) => [a, v * step]));
@@ -338,34 +340,28 @@ function makeJogger() {
     clearInterval(repeatTimer);
     holdTimer = repeatTimer = null;
   };
-  // Arrête la répétition puis termine le pas en cours, sans le pas d'avance.
-  async function snapToGrid() {
-    snapping = true;
+  // Arrêt immédiat. Les zéros restent grisés jusqu'à l'arrêt complet, pour
+  // être posés à la position finale.
+  async function stopNow() {
+    stopping = true;
+    jogSettling++;
+    updateEnabled();
     try {
       await request('jogStop');
       await waitUntil(() => S.machine.status.state === 'Idle', 5000);
-      await new Promise((r) => setTimeout(r, 250)); // dernier rapport de position
-      const pos = S.machine.status.wpos;
-      const axes = {};
-      for (const [a, v] of Object.entries(dir)) {
-        const d = v * step;
-        const k = Math.ceil((pos[a] - start[a]) / d - 1e-3);
-        const rest = start[a] + k * d - pos[a];
-        if (Math.abs(rest) > 0.0005) axes[a] = Math.round(rest * 1000) / 1000;
-      }
-      if (Object.keys(axes).length) await request('jog', { axes, feed: feed() });
     } catch (e) {
       toastOnce(e.message);
     } finally {
-      snapping = false;
+      stopping = false;
+      jogSettling--;
+      updateEnabled();
     }
   }
   return {
     press(d) {
-      if (holdTimer || repeatTimer || snapping) return;
+      if (holdTimer || repeatTimer || stopping) return;
       dir = d;
       step = jogStep;
-      start = { ...S.machine.status.wpos };
       stepOnce();
       holdTimer = setTimeout(() => {
         holdTimer = null;
@@ -379,7 +375,7 @@ function makeJogger() {
     release() {
       const repeating = !!repeatTimer;
       stopTimers();
-      if (repeating) snapToGrid();
+      if (repeating) stopNow();
     },
   };
 }
@@ -1349,7 +1345,7 @@ const TOUR = [
   },
   {
     target: '.jog', title: 'Déplacer la tête',
-    body: `<p><b>Appui</b> = un pas de la taille choisie. <b>Appui maintenu</b> = le même pas répété (avec 1 : 1 mm, 1 mm, 1 mm…), arrêt sur un multiple du pas au relâchement.</p>
+    body: `<p><b>Appui</b> = un pas de la taille choisie. <b>Appui maintenu</b> = le même pas répété (avec 1 : 1 mm, 1 mm, 1 mm…), arrêt immédiat au relâchement.</p>
       <p>Au clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> pour X/Y, <kbd>+</kbd><kbd>−</kbd> ou <kbd>PgUp</kbd><kbd>PgDn</kbd> pour Z, <kbd>Échap</kbd> pour arrêter.</p>`,
   },
   {
@@ -1551,7 +1547,7 @@ const INFO = {
   dro: { title: 'Position travail et machine', html: `<p><b>Grands chiffres</b> : position par rapport au zéro de la pièce (G54). C'est le repère du programme.</p>
     <p><b>Ligne M</b> : position machine, par rapport aux fins de course. Elle ne change pas quand on refait le zéro.</p>
     <p><b>X = 0</b> pose le zéro à la position actuelle. <b>Cliquez un chiffre</b> pour taper une valeur, par exemple 20 si l'outil est posé sur une cale de 20 mm. Le zéro reste mémorisé dans la carte.</p>` },
-  jog: { title: 'Déplacer la tête', html: `<p><b>Appui</b> : un pas de la taille choisie. <b>Appui maintenu</b> : le même pas répété (avec 10 : 10 mm, 10 mm, 10 mm…). Au relâchement, la tête finit le pas en cours et s'arrête : la position reste un multiple du pas.</p>
+  jog: { title: 'Déplacer la tête', html: `<p><b>Appui</b> : un pas de la taille choisie. <b>Appui maintenu</b> : le même pas répété (avec 10 : 10 mm, 10 mm, 10 mm…). Au relâchement, la tête s'arrête aussitôt.</p>
     <p><b>■</b> ou <kbd>Échap</kbd> arrêtent tout de suite.</p>
     <p>Clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> X/Y, <kbd>+</kbd><kbd>−</kbd> ou <kbd>PgUp</kbd><kbd>PgDn</kbd> Z, <kbd>Échap</kbd> stop.</p>
     <p>Bloqué en alarme et pendant l'usinage. Si l'écran perd la connexion, le mouvement s'arrête.</p>` },

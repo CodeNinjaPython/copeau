@@ -123,7 +123,7 @@ Une barre rouge sous le haut de l'écran explique l'alarme en cours. Alarmes fr�
 ### Les flèches à l'écran
 
 - **Appui court** : un pas de la taille choisie (0.01, 0.1, 1, 10 ou 50 mm).
-- **Appui maintenu** : le même pas est répété tant que vous gardez le doigt ou le clic. Avec le pas sur 1 : 1 mm, 1 mm, 1 mm… ; avec 10 : 10 mm, 10 mm… Au relâchement, la tête finit seulement le pas en cours et s'arrête : toujours sur un multiple du pas, au plus près de l'endroit où vous avez lâché.
+- **Appui maintenu** : le même pas est répété tant que vous gardez le doigt ou le clic. Avec le pas sur 1 : 1 mm, 1 mm, 1 mm… ; avec 10 : 10 mm, 10 mm… Au relâchement, la tête s'arrête aussitôt, là où elle se trouve.
 - **■** : arrêt immédiat du déplacement.
 - Les diagonales déplacent X et Y en même temps.
 
