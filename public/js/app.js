@@ -320,36 +320,67 @@ $('#jog-feed').onchange = () => store.set('jogFeed', Number($('#jog-feed').value
 const parseJog = (spec) => Object.fromEntries(spec.split(' ').map((p) => [p[0], Number(p.slice(1))]));
 
 // Appui = un pas de la taille choisie. Appui maintenu = le même pas répété
-// (1, 1, 1… ou 10, 10, 10…) au rythme où la machine le parcourt, avec au plus
-// un pas d'avance. Au relâchement, le pas en cours se termine : la position
-// reste sur la grille du pas. ■ ou Échap arrêtent net.
+// (1, 1, 1… ou 10, 10, 10…) au rythme où la machine le parcourt, avec un pas
+// d'avance pour un mouvement fluide. Au relâchement, ce pas d'avance est
+// annulé et la tête finit seulement le pas en cours : elle s'arrête au
+// prochain multiple du pas, au plus près de l'endroit où l'on a lâché.
+// ■ ou Échap arrêtent net.
 function makeJogger() {
-  let holdTimer = null, repeatTimer = null, dir = null;
+  let holdTimer = null, repeatTimer = null, dir = null, start = null, step = 1, snapping = false;
   const feed = () => Number($('#jog-feed').value) || 1000;
   const stepOnce = () => {
-    const axes = Object.fromEntries(Object.entries(dir).map(([a, v]) => [a, v * jogStep]));
-    request('jog', { axes, feed: feed() }).catch((e) => toastOnce(e.message));
+    const axes = Object.fromEntries(Object.entries(dir).map(([a, v]) => [a, v * step]));
+    // « Annulé » : pas d'avance retiré au relâchement, c'est voulu.
+    request('jog', { axes, feed: feed() }).catch((e) => { if (e.message !== 'Annulé') toastOnce(e.message); });
   };
-  const stop = () => {
+  const stopTimers = () => {
     clearTimeout(holdTimer);
     clearInterval(repeatTimer);
     holdTimer = repeatTimer = null;
   };
+  // Arrête la répétition puis termine le pas en cours, sans le pas d'avance.
+  async function snapToGrid() {
+    snapping = true;
+    try {
+      await request('jogStop');
+      await waitUntil(() => S.machine.status.state === 'Idle', 5000);
+      await new Promise((r) => setTimeout(r, 250)); // dernier rapport de position
+      const pos = S.machine.status.wpos;
+      const axes = {};
+      for (const [a, v] of Object.entries(dir)) {
+        const d = v * step;
+        const k = Math.ceil((pos[a] - start[a]) / d - 1e-3);
+        const rest = start[a] + k * d - pos[a];
+        if (Math.abs(rest) > 0.0005) axes[a] = Math.round(rest * 1000) / 1000;
+      }
+      if (Object.keys(axes).length) await request('jog', { axes, feed: feed() });
+    } catch (e) {
+      toastOnce(e.message);
+    } finally {
+      snapping = false;
+    }
+  }
   return {
     press(d) {
-      if (holdTimer || repeatTimer) return;
+      if (holdTimer || repeatTimer || snapping) return;
       dir = d;
+      step = jogStep;
+      start = { ...S.machine.status.wpos };
       stepOnce();
       holdTimer = setTimeout(() => {
         holdTimer = null;
         // Durée d'un pas à la vitesse jog (diagonale comprise).
-        const dist = jogStep * Math.hypot(...Object.values(dir));
+        const dist = step * Math.hypot(...Object.values(dir));
         const ms = Math.max(40, (dist / feed()) * 60000);
         stepOnce(); // un pas d'avance pour un mouvement fluide
         repeatTimer = setInterval(stepOnce, ms);
       }, 300);
     },
-    release: stop,
+    release() {
+      const repeating = !!repeatTimer;
+      stopTimers();
+      if (repeating) snapToGrid();
+    },
   };
 }
 
@@ -1520,7 +1551,7 @@ const INFO = {
   dro: { title: 'Position travail et machine', html: `<p><b>Grands chiffres</b> : position par rapport au zéro de la pièce (G54). C'est le repère du programme.</p>
     <p><b>Ligne M</b> : position machine, par rapport aux fins de course. Elle ne change pas quand on refait le zéro.</p>
     <p><b>X = 0</b> pose le zéro à la position actuelle. <b>Cliquez un chiffre</b> pour taper une valeur, par exemple 20 si l'outil est posé sur une cale de 20 mm. Le zéro reste mémorisé dans la carte.</p>` },
-  jog: { title: 'Déplacer la tête', html: `<p><b>Appui</b> : un pas de la taille choisie. <b>Appui maintenu</b> : le même pas répété (avec 10 : 10 mm, 10 mm, 10 mm…). Au relâchement, le pas en cours se termine, la position reste un multiple du pas.</p>
+  jog: { title: 'Déplacer la tête', html: `<p><b>Appui</b> : un pas de la taille choisie. <b>Appui maintenu</b> : le même pas répété (avec 10 : 10 mm, 10 mm, 10 mm…). Au relâchement, la tête finit le pas en cours et s'arrête : la position reste un multiple du pas.</p>
     <p><b>■</b> ou <kbd>Échap</kbd> arrêtent tout de suite.</p>
     <p>Clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> X/Y, <kbd>+</kbd><kbd>−</kbd> ou <kbd>PgUp</kbd><kbd>PgDn</kbd> Z, <kbd>Échap</kbd> stop.</p>
     <p>Bloqué en alarme et pendant l'usinage. Si l'écran perd la connexion, le mouvement s'arrête.</p>` },

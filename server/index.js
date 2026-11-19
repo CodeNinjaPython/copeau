@@ -235,10 +235,16 @@ const handlers = {
     if (run.abort) grbl.realtime('jogCancel');
   },
 
+  // Annulation du jog. Comme le recommande la doc Grbl, un G4P0 suit
+  // l'annulation : son « ok » arrive une fois l'arrêt terminé, la position
+  // lue ensuite est donc la position finale.
   async jogStop(_, ws) {
     ws.jogging = false;
     if (pathRun) pathRun.abort = true;
+    if (!grbl.ready) return;
+    grbl.dropQueued('jog');
     grbl.realtime('jogCancel');
+    await grbl.cmd('G4P0', 'sync').catch(() => {});
   },
 
   async getConfig() { return config; },
