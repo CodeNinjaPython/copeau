@@ -141,6 +141,7 @@ function buildDro() {
         <input class="dro-input" data-input="${a}" type="number" step="any" inputmode="decimal" hidden>
         <small data-m="${a}">M 0.000</small>
       </span>
+      <button class="ghost dro-home" data-axis-home="${a}" title="Ramener seulement ${a} à l'origine (${a}0)">⌂</button>
       <button class="ghost" data-zero="${a}" title="Définir la position actuelle comme ${a}0">${a} = 0</button>
     </div>`).join('');
   for (const a of ['X', 'Y', 'Z']) drO[a] = { w: $(`[data-w="${a}"]`), m: $(`[data-m="${a}"]`) };
@@ -234,7 +235,7 @@ function updateEnabled() {
   const jobActive = ['running', 'paused', 'spinup', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
   const canJog = m.ready && (state === 'Idle' || state === 'Jog') && !(jobActive && S.job.state !== 'toolchange');
   $$('[data-jog], #jog-stop').forEach((b) => (b.disabled = !canJog));
-  $$('[data-zero], [data-edit], #btn-goto-zero, #btn-goto-origin').forEach((b) => (b.disabled = !idle || (jobActive && S.job.state !== 'toolchange')));
+  $$('[data-zero], [data-edit], [data-axis-home], #btn-goto-zero, #btn-goto-origin').forEach((b) => (b.disabled = !idle || (jobActive && S.job.state !== 'toolchange')));
   $('#btn-unlock').disabled = !m.ready;
   $('#btn-home').disabled = !m.ready || jobActive;
   $('#btn-reset').disabled = !m.connected;
@@ -283,6 +284,17 @@ $('#btn-goto-zero').onclick = () => {
   act('jogTo', { X: 0, Y: 0, liftZ: safeZ(), feed: Number($('#jog-feed').value) }).catch(() => {});
 };
 // ⌂ Origine : retour complet au zéro établi (X0 Y0 puis Z0, descente lente).
+// ⌂ d'un axe : seul cet axe revient à 0 (Z descend lentement, X/Y à la hauteur actuelle).
+$('#dro').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-axis-home]');
+  if (!b || b.disabled) return;
+  const axis = b.dataset.axisHome;
+  const w = S.machine.status.wpos;
+  if (Math.abs(w[axis]) < 0.0005) return toast(`${axis} est déjà à 0`, 'info');
+  if (axis !== 'Z' && w.Z < 0 && !confirm(`L'outil est sous Z0 (Z ${w.Z.toFixed(3)}), donc dans la pièce.\n\nDéplacer ${axis} jusqu'à 0 à cette hauteur ?`)) return;
+  act('axisToZero', { axis, feed: Number($('#jog-feed').value), plungeFeed: 300 }).catch(() => {});
+});
+
 $('#btn-goto-origin').onclick = () => {
   const w = S.machine.status.wco || {};
   if (!w.X && !w.Y && !w.Z && !confirm('Aucun zéro ne semble défini : l\'origine est celle de la machine (0, 0, 0).\n\nY aller quand même ?')) return;
@@ -1548,7 +1560,8 @@ const INFO = {
     <p>Copeau vérifie que le programme tient dedans. <b>Parcourir le contour</b> fait le tour à la hauteur de survol : pratique pour vérifier le bridage.</p>` },
   fit: { title: 'Vérification', html: `<p>Compare le cadre du programme (avec le zéro actuel) au plateau, à la course Z et à la zone de travail.</p>
     <p>Rouge : le programme dépasse. Copeau demandera confirmation au démarrage.</p>` },
-  origin: { title: 'Revenir à l\'origine', html: `<p><b>⌂ Origine</b> ramène l'outil exactement au zéro établi : il monte d'abord à la hauteur de survol (onglet Zone) s'il est plus bas, rejoint X0 Y0, puis <b>descend lentement jusqu'à Z0</b> (300 mm/min au plus).</p>
+  origin: { title: 'Revenir à l\'origine', html: `<p>Le petit <b>⌂</b> de chaque ligne X, Y ou Z ramène <b>seulement cet axe</b> à 0, les autres ne bougent pas. Z descend lentement vers Z0 ; X et Y se déplacent à la hauteur actuelle (confirmation demandée si l'outil est sous Z0).</p>`
+    + `<p><b>⌂ Origine</b> ramène l'outil exactement au zéro établi : il monte d'abord à la hauteur de survol (onglet Zone) s'il est plus bas, rejoint X0 Y0, puis <b>descend lentement jusqu'à Z0</b> (300 mm/min au plus).</p>
     <p><b>→ X0 Y0</b> s'arrête au-dessus de l'origine, à la hauteur de survol, sans descendre.</p>
     <p>Pratique pour vérifier un zéro avant de lancer. <kbd>Échap</kbd> ou ■ arrête le mouvement.</p>` },
   safeZ: { title: 'Hauteur de survol', html: `<p>Hauteur (Z travail) à laquelle la tête monte avant « Aller ici » et les parcours de contour. Elle doit dépasser les brides et la pièce.</p>` },
