@@ -14,7 +14,7 @@ const PORT = Number(process.env.PORT || 8000);
 // Par défaut seul cet ordinateur peut piloter la machine.
 // HOST=0.0.0.0 pour y accéder depuis une tablette du réseau local.
 const HOST = process.env.HOST || '127.0.0.1';
-const DATA_DIR = path.join(root, 'data');
+const DATA_DIR = path.resolve(process.env.COPEAU_DATA_DIR || path.join(root, 'data'));
 const MACROS_FILE = path.join(DATA_DIR, 'macros.json');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 const SIMULATOR = 'simulateur';
@@ -250,7 +250,36 @@ wss.on('connection', (ws) => {
   ws.on('close', () => { if (ws.jogging) grbl.realtime('jogCancel'); });
 });
 
-server.listen(PORT, HOST, () => {
-  const where = HOST === '0.0.0.0' ? `http://<ip-de-cet-ordinateur>:${PORT}` : `http://localhost:${PORT}`;
-  console.log(`Copeau prêt : ${where}`);
-});
+export function startServer({ port = PORT, host = HOST } = {}) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      const address = server.address();
+      const actualPort = typeof address === 'object' && address ? address.port : port;
+      const where = host === '0.0.0.0' ? `http://<ip-de-cet-ordinateur>:${actualPort}` : `http://localhost:${actualPort}`;
+      console.log(`Copeau prêt : ${where}`);
+      resolve(server);
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, host);
+  });
+}
+
+export async function stopServer() {
+  if (grbl.connected) grbl.detach('Application fermée');
+  for (const ws of wss.clients) ws.terminate();
+  if (server.listening) {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await startServer();
+}

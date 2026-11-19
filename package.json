@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "description": "Interface web pour piloter une CNC Grbl / grblHAL",
   "type": "module",
-  "main": "server/index.js",
+  "main": "desktop/main.js",
   "scripts": {
     "start": "node server/index.js",
+    "desktop": "electron .",
+    "build:portable": "electron-builder --win portable",
     "test": "node --test test/*.test.js"
   },
   "engines": { "node": ">=20" },
@@ -15,5 +17,23 @@
     "serialport": "^13.0.0",
     "three": "^0.187.0",
     "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "fr.copeau.desktop",
+    "productName": "Copeau",
+    "directories": {
+      "output": "dist"
+    },
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "win": {
+      "target": "portable",
+      "artifactName": "Copeau-Portable-${version}.${ext}"
+    }
   }
 }

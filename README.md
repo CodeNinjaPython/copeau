@@ -11,6 +11,19 @@ npm start            # http://localhost:8000
 
 Choisissez le port série de la machine (ou **Simulateur Grbl** pour essayer sans machine), puis **Connecter**.
 
+## Application Windows portable
+
+Avec Node.js 20 ou plus récent, depuis Windows :
+
+```powershell
+npm install
+npm run build:portable
+```
+
+Le fichier `dist/Copeau-Portable-0.1.0.exe` est autonome : il s'exécute sans installer Node.js. Placez-le dans un dossier accessible en écriture ; les macros et réglages sont enregistrés dans le dossier `data` à côté du `.exe`. Le port série reste directement géré par l'application.
+
+Pour lancer la fenêtre de bureau en développement : `npm run desktop`. La commande `npm start` conserve le lancement du serveur web.
+
 Pour piloter depuis une tablette ou un téléphone du réseau local :
 
 ```bash
