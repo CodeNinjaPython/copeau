@@ -1,6 +1,7 @@
 import { Viewer, outline } from './viewer.js';
 import { startTour } from './tour.js';
 import { Preview } from './preview.js';
+import { ibtn, initInfo } from './info.js';
 import { splitProgram, analyze, buildResume } from './shared/gcode.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -220,7 +221,7 @@ function renderMachine() {
   if (alarm) bar.textContent = `${bar.dataset.text || 'Machine en alarme'}. Faites l'origine ($H) ou déverrouillez ($X) si la position est sûre.`;
 
   viewer.setTool(s.wpos);
-  const wcoKey = `${s.wco?.X},${s.wco?.Y}`;
+  const wcoKey = `${s.wco?.X},${s.wco?.Y},${s.wco?.Z}`;
   if (wcoKey !== lastWcoKey) { lastWcoKey = wcoKey; renderZones(); }
   updateEnabled();
 }
@@ -630,7 +631,7 @@ function renderProbe() {
   $$('#probe-corners button').forEach((b) => b.classList.toggle('active', b.dataset.corner === probeCorner));
   const vals = probeValues(probeKind);
   $('#probe-fields').innerHTML = PROBE_FIELDS[probeKind].map(([k, label]) =>
-    `<label class="field">${label}<input type="number" step="any" data-pk="${k}" value="${vals[k]}"></label>`).join('');
+    `<label class="field"><span>${label} ${ibtn(`pf-${k}`)}</span><input type="number" step="any" data-pk="${k}" value="${vals[k]}"></label>`).join('');
 }
 $('#probe-kind').onclick = (e) => { const b = e.target.closest('[data-kind]'); if (b) { probeKind = b.dataset.kind; renderProbe(); } };
 $('#probe-corners').onclick = (e) => { const b = e.target.closest('[data-corner]'); if (b) { probeCorner = b.dataset.corner; store.set('probeCorner', probeCorner); renderProbe(); } };
@@ -674,7 +675,15 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 
 function shapeToWork(sh) {
   if (!sh) return null;
-  return sh.kind === 'circle' ? { kind: 'circle', c: toWork(sh.c), r: sh.r } : { kind: 'rect', a: toWork(sh.a), b: toWork(sh.b) };
+  if (sh.kind === 'circle') return { kind: 'circle', c: toWork(sh.c), r: sh.r };
+  const out = { kind: 'rect', a: toWork(sh.a), b: toWork(sh.b) };
+  // Course Z du plateau : volume machine de -z à 0, ramené en Z travail.
+  if (sh.z) {
+    const wz = S.machine.status.wco?.Z || 0;
+    out.zTop = -wz;
+    out.zBottom = -sh.z - wz;
+  }
+  return out;
 }
 
 function insideShape(sh, p, tol = 0.001) {
@@ -686,7 +695,7 @@ function insideShape(sh, p, tol = 0.001) {
 function shapeSize(sh) {
   if (!sh) return 'non défini';
   if (sh.kind === 'circle') return `Ø ${fmtNum(sh.r * 2)} mm`;
-  return `${fmtNum(Math.abs(sh.b.X - sh.a.X))} × ${fmtNum(Math.abs(sh.b.Y - sh.a.Y))} mm`;
+  return `${fmtNum(Math.abs(sh.b.X - sh.a.X))} × ${fmtNum(Math.abs(sh.b.Y - sh.a.Y))}${sh.z ? ` × ${fmtNum(sh.z)}` : ''} mm`;
 }
 
 // Brouillons en cours de saisie (coordonnées machine), un par carte.
@@ -703,10 +712,12 @@ resetDrafts();
 function complete(d) {
   if (d.kind === 'circle') return d.c && d.r > 0 ? { kind: 'circle', c: d.c, r: r3(d.r) } : null;
   if (!d.a || !d.b || Math.abs(d.a.X - d.b.X) < 0.1 || Math.abs(d.a.Y - d.b.Y) < 0.1) return null;
-  return { kind: 'rect', a: d.a, b: d.b };
+  return { kind: 'rect', a: d.a, b: d.b, ...(d.z > 0 ? { z: r3(d.z) } : {}) };
 }
 
 function saveShape(target, shape) {
+  // Redessiner le plateau à la souris ne doit pas perdre sa course Z.
+  if (target === 'table' && shape && !shape.z && S.zones.table?.z) shape = { ...shape, z: S.zones.table.z };
   const zones = { ...S.zones, [target]: shape };
   return act('setConfig', { key: 'zones', value: zones })
     .then(() => toast(shape ? `${target === 'table' ? 'Plateau' : 'Zone de travail'} : ${shapeSize(shape)}` : 'Forme effacée', 'ok'))
@@ -748,36 +759,43 @@ function renderZoneCard(target) {
   if (target === 'table') renderTableDims(card, saved);
 }
 
-// Saisie directe des dimensions du plateau (largeur X × profondeur Y).
+// Course machine (taille de travail max) : X × Y × Z, saisie ou lue dans la
+// carte ($130 / $131 / $132), avec écriture possible dans Grbl.
 function renderTableDims(card, saved) {
   const box = card.querySelector('[data-dims]');
   if (box.contains(document.activeElement)) return;
-  const w = saved ? r3(Math.abs(saved.b.X - saved.a.X)) : '';
-  const h = saved ? r3(Math.abs(saved.b.Y - saved.a.Y)) : '';
-  const anchor = saved || drafts.table.a ? 'coin1' : S.machine.ready ? 'machine' : 'tool';
+  const set = S.settings;
+  const val = (fromShape, key) => (fromShape !== undefined ? r3(fromShape) : set[key] ? r3(Number(set[key])) : '');
+  const w = val(saved && Math.abs(saved.b.X - saved.a.X), 130);
+  const h = val(saved && Math.abs(saved.b.Y - saved.a.Y), 131);
+  const z = val(saved ? saved.z || undefined : undefined, 132);
+  const field = (k, v, ph) => `<input type="number" step="any" min="1" data-dim="${k}" placeholder="${ph}" value="${v}" class="${v !== '' ? '' : 'empty'}" title="Course ${k} (mm)">`;
+  const anchor = store.get('tableAnchor', 'machine');
   box.innerHTML = `
-    <div class="zone-pt"><span>Dimensions</span>
-      <input type="number" step="any" min="1" data-dim="W" placeholder="Largeur X" value="${w}" class="${w ? '' : 'empty'}" title="Largeur en X (mm)">
-      <input type="number" step="any" min="1" data-dim="D" placeholder="Profondeur Y" value="${h}" class="${h ? '' : 'empty'}" title="Profondeur en Y (mm)">
-      <button class="primary small" data-dims-apply>Appliquer</button></div>
-    <div class="zone-dims-anchor"><span>Ancrage</span>
+    <div class="zone-dims-row"><span>Course</span>${field('X', w, 'X')}${field('Y', h, 'Y')}${field('Z', z, 'Z')}</div>
+    <div class="zone-dims-anchor"><span>Ancrage ${ibtn('anchor')}</span>
       <select data-anchor>
+        <option value="machine"${anchor === 'machine' ? ' selected' : ''}>Origine machine (Grbl, vers X− Y−)</option>
         <option value="coin1"${anchor === 'coin1' ? ' selected' : ''}>Coin 1 fixe</option>
-        <option value="machine"${anchor === 'machine' ? ' selected' : ''}>Origine machine (vers X− Y−)</option>
         <option value="tool"${anchor === 'tool' ? ' selected' : ''}>Outil = coin avant gauche</option>
-      </select></div>`;
+      </select></div>
+    <label class="check small"><input type="checkbox" data-write-grbl ${S.machine.ready ? 'checked' : 'disabled'}> Écrire aussi dans la carte ($130 / $131 / $132) ${ibtn('writeGrbl')}</label>
+    <div class="row gap"><button class="primary small grow" data-dims-apply>Appliquer</button><button class="ghost small" data-from-grbl title="Lire la course enregistrée dans la carte">Lire la carte</button></div>`;
 }
 
-function applyTableDims(card) {
-  const W = Number(card.querySelector('[data-dim="W"]').value);
-  const D = Number(card.querySelector('[data-dim="D"]').value);
-  if (!(W >= 1) || !(D >= 1)) return toast('Indiquez une largeur et une profondeur d\'au moins 1 mm', 'err');
+async function applyTableDims(card) {
+  const W = Number(card.querySelector('[data-dim="X"]').value);
+  const D = Number(card.querySelector('[data-dim="Y"]').value);
+  const zIn = card.querySelector('[data-dim="Z"]').value;
+  const Z = zIn === '' ? 0 : Number(zIn);
+  if (!(W >= 1) || !(D >= 1)) return toast('Indiquez une course X et Y d\'au moins 1 mm', 'err');
+  if (zIn !== '' && !(Z >= 1)) return toast('Course Z invalide', 'err');
   const anchor = card.querySelector('[data-anchor]').value;
+  store.set('tableAnchor', anchor);
   let a, b;
   if (anchor === 'machine') {
     a = { X: 0, Y: 0 };
     b = { X: -W, Y: -D };
-    toast('Valable si la prise d\'origine a été faite', 'info');
   } else if (anchor === 'tool') {
     if (!S.machine.ready) return toast('Connectez la machine pour utiliser la position de l\'outil', 'err');
     const m = S.machine.status.mpos;
@@ -791,7 +809,15 @@ function applyTableDims(card) {
     a = cur.a;
     b = { X: r3(a.X + sx * W), Y: r3(a.Y + sy * D) };
   }
-  drafts.table = { kind: 'rect', a, b };
+  const write = card.querySelector('[data-write-grbl]')?.checked;
+  if (write) {
+    const st = S.machine.status.state;
+    if (!S.machine.ready || !['Idle', 'Alarm'].includes(st)) return toast('La carte accepte les réglages seulement à l\'arrêt (Prêt ou Alarme)', 'err');
+    const lines = [`$130=${r3(W)}`, `$131=${r3(D)}`, ...(Z ? [`$132=${r3(Z)}`] : [])];
+    if (!confirm(`Écrire la course dans la carte ?\n\n${lines.join('\n')}\n\nGrbl s'en sert pour les limites logicielles et la prise d'origine.`)) return;
+    await act('cmd', { line: [...lines, '$$'].join('\n') }).catch(() => {});
+  }
+  drafts.table = { kind: 'rect', a, b, ...(Z ? { z: Z } : {}) };
   document.activeElement?.blur();
   commitDraft('table');
 }
@@ -807,6 +833,10 @@ function fitCheck(offset = { X: 0, Y: 0 }) {
   const table = shapeToWork(S.zones.table);
   const size = `${fmtNum(i.max.X - i.min.X)} × ${fmtNum(i.max.Y - i.min.Y)} mm`;
   if (table && !corners.every((p) => insideShape(table, p))) return { ok: false, text: `Le programme (${size}) dépasse du plateau avec le zéro actuel.` };
+  if (table?.zBottom !== undefined && Number.isFinite(i.min.Z)) {
+    if (i.min.Z < table.zBottom - 0.001) return { ok: false, text: `Le programme descend à Z ${fmtNum(i.min.Z)}, sous la course Z de la machine (Z ${fmtNum(table.zBottom)} au plus bas avec le zéro actuel).` };
+    if (i.max.Z > table.zTop + 0.001) return { ok: false, text: `Le programme monte à Z ${fmtNum(i.max.Z)}, au-dessus de la course Z de la machine (Z ${fmtNum(table.zTop)} au plus haut avec le zéro actuel).` };
+  }
   if (zone && !corners.every((p) => insideShape(zone, p))) return { ok: false, text: `Le programme (${size}) sort de la zone de travail avec le zéro actuel.` };
   if (!zone && !table) return { ok: true, text: `Programme : ${size}. Définissez une zone pour vérifier qu'il tient.` };
   return { ok: true, text: `Le programme (${size}) tient dans la ${zone ? 'zone de travail' : 'surface du plateau'}.` };
@@ -899,10 +929,10 @@ for (const card of $$('.zone-card[data-target]')) {
       drafts[target] = { kind: drafts[target].kind };
       saveShape(target, null);
     } else if ('fromGrbl' in b.dataset) {
-      const w = Number(S.settings[130]), h = Number(S.settings[131]);
+      const w = Number(S.settings[130]), h = Number(S.settings[131]), z = Number(S.settings[132]);
       if (!w || !h) return toast('Réglages $130 / $131 indisponibles : connectez la machine', 'err');
-      toast('Valable si la prise d\'origine a été faite', 'info');
-      drafts.table = { kind: 'rect', a: { X: 0, Y: 0 }, b: { X: -w, Y: -h } };
+      toast('Course lue dans la carte (volume valable après la prise d\'origine)', 'info');
+      drafts.table = { kind: 'rect', a: { X: 0, Y: 0 }, b: { X: -w, Y: -h }, ...(z ? { z } : {}) };
       commitDraft('table');
     } else if ('fromJob' in b.dataset) {
       const i = S.info;
@@ -1303,6 +1333,75 @@ $('#settings-list').addEventListener('change', async (e) => {
   await act('cmd', { line: `$${k}=${input.value}\n$$` }).catch(() => {});
   input.blur();
 });
+
+
+// ---- Bulles d'aide « i » -------------------------------------------------------
+
+const INFO = {
+  connect: { title: 'Connexion', html: `<p><b>Port</b> : la carte apparaît comme <code>/dev/cu.usbserial…</code> ou <code>/dev/cu.usbmodem…</code> sur Mac, <code>COM3</code>… sur Windows. <b>Simulateur</b> = machine virtuelle, sans risque.</p>
+    <p><b>Vitesse</b> : 115200 pour Grbl standard. Si rien ne répond, essayez 250000.</p>
+    <p>Un seul logiciel peut utiliser le port : fermez UGS, Candle ou CNCjs.</p>` },
+  state: { title: 'Origine, déverrouillage, reset', html: `<p><b>Origine ($H)</b> : la machine va chercher ses fins de course, sa position devient exacte. À faire à chaque mise sous tension.</p>
+    <p><b>Déverrouiller ($X)</b> : lève l'alarme sans bouger. Seulement si vous êtes sûr de la position.</p>
+    <p><b>Reset</b> vide la mémoire de la carte. Ce n'est <b>pas</b> un arrêt d'urgence.</p>` },
+  dro: { title: 'Position travail et machine', html: `<p><b>Grands chiffres</b> : position par rapport au zéro de la pièce (G54). C'est le repère du programme.</p>
+    <p><b>Ligne M</b> : position machine, par rapport aux fins de course. Elle ne change pas quand on refait le zéro.</p>
+    <p><b>X = 0</b> pose le zéro à la position actuelle. <b>Cliquez un chiffre</b> pour taper une valeur, par exemple 20 si l'outil est posé sur une cale de 20 mm. Le zéro reste mémorisé dans la carte.</p>` },
+  jog: { title: 'Déplacer la tête', html: `<p><b>Appui court</b> : un pas de la taille choisie. <b>Appui maintenu</b> : mouvement continu jusqu'au relâchement.</p>
+    <p>Clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> X/Y, <kbd>PgUp</kbd><kbd>PgDn</kbd> Z, <kbd>Échap</kbd> stop.</p>
+    <p>Bloqué en alarme et pendant l'usinage. Si l'écran perd la connexion, le mouvement s'arrête.</p>` },
+  jogFeed: { title: 'Vitesse jog', html: `<p>Vitesse des déplacements manuels, en mm/min. 2000 convient en général ; réduisez près de la pièce.</p><p>Grbl la plafonne à la vitesse max de chaque axe ($110 à $112).</p>` },
+  overrides: { title: 'Corrections en direct', html: `<p>Agissent tout de suite, même pendant l'usinage, <b>sans modifier le fichier</b>.</p>
+    <p><b>Avance</b> et <b>broche</b> : 10 à 200 %. <b>Rapide</b> : 25, 50 ou 100 %.</p>
+    <p>Utile pour ralentir une passe qui vibre. Un reset remet tout à 100 %.</p>` },
+  viewer: { title: 'Vue 3D', html: `<p>Glisser : tourner. Clic droit ou deux doigts : déplacer. Molette ou pincement : zoom.</p>
+    <p><b>Bleu</b> usinage, <b>gris</b> rapides, <b>orange</b> déjà usiné, <b>vert</b> simulé. Cône jaune = outil réel.</p>
+    <p><b>Clic sur le plateau</b> : y amener la tête. <b>Placer</b> : glisser le programme (décale l'origine). <b>Simuler</b> : voir l'usinage avant de lancer.</p>` },
+  gotoLift: { title: 'Monter avant de traverser', html: `<p>Remonte d'abord à la hauteur de survol (onglet Zone), pour ne pas traverser la pièce ou une bride en ligne droite.</p>` },
+  sim: { title: 'Simulation', html: `<p>Tout se passe dans le navigateur : <b>rien n'est envoyé à la machine</b>.</p>
+    <p>Suppose une fraise droite du Ø indiqué et un dessus de pièce à Z0. Les accélérations ne sont pas simulées : la durée réelle sera un peu plus longue.</p>
+    <p><kbd>Espace</kbd> : lecture / pause. Le curseur va en avant comme en arrière.</p>` },
+  job: { title: 'Programme', html: `<p><b>Durée estimée</b> d'après les avances du fichier ; la durée réelle est un peu plus longue.</p>
+    <p><b>Pause</b> : arrêt immédiat du mouvement. <b>Arrêter</b> : ralentit puis vide la carte, la position est conservée.</p>
+    <p>Une erreur de la carte met le job en pause au lieu de continuer.</p>` },
+  console: { title: 'Console', html: `<p>Envoie n'importe quelle commande G-code ou $. <kbd>↑</kbd><kbd>↓</kbd> : historique.</p>
+    <p><code>$$</code> réglages, <code>$G</code> modes actifs, <code>$#</code> origines, <code>$I</code> version.</p><p>Orange = envoyé, bleu = info, rouge = erreur.</p>` },
+  resume: { title: 'Numéro de ligne', html: `<p>Les numéros comptent <b>seulement les lignes envoyées</b> (sans commentaires ni lignes vides) : ils peuvent différer de votre éditeur. Fiez-vous au code affiché.</p>
+    <p>Choisissez une ligne un peu avant l'arrêt. Le préambule rétablit les modes, relance la broche, monte au Z le plus haut déjà utilisé puis replonge lentement.</p>` },
+  spinup: { title: 'Attente broche', html: `<p>Temps laissé à la broche pour atteindre sa vitesse avant de replonger. 3 s pour une petite broche, 5 à 10 s pour une grosse broche avec variateur.</p>` },
+  probe: { title: 'La sonde', html: `<p>Une pince sur l'outil et une plaque (ou la pièce si elle est conductrice) reliée à l'entrée sonde de la carte.</p>
+    <p><b>Testez avant</b> : touchez la plaque avec la pince, puis envoyez <code>?</code> dans la console : l'état doit contenir <code>Pn:P</code>.</p>
+    <p>Sans contact : alarme 5. Déverrouillez, rapprochez l'outil et recommencez.</p>` },
+  'pf-plate': { html: `<p>Épaisseur de la plaque posée sur la pièce. <b>0</b> si l'outil touche directement la pièce.</p>` },
+  'pf-travel': { html: `<p>Distance maximale d'approche. Sans contact sur cette distance : arrêt et alarme 5.</p>` },
+  'pf-fastFeed': { html: `<p>Première approche, rapide. Restez modéré (100 à 200 mm/min) pour ne pas abîmer l'outil ou la plaque.</p>` },
+  'pf-slowFeed': { html: `<p>Seconde approche, lente : c'est elle qui fait la mesure. Plus lent = plus précis.</p>` },
+  'pf-retract': { html: `<p>Remontée de l'outil à la fin du palpage.</p>` },
+  'pf-toolDia': { html: `<p>Diamètre <b>réel</b> de l'outil, mesuré au pied à coulisse : il sert à corriger X et Y du rayon.</p>` },
+  'pf-wall': { html: `<p>Avec une cale d'angle : épaisseur de sa paroi entre l'outil et la pièce. <b>0</b> si l'outil touche directement les flancs.</p>` },
+  'pf-inset': { html: `<p>Distance approximative entre l'outil et chaque bord du coin au départ. L'outil sortira de cette distance + son rayon + 5 mm avant de redescendre.</p>` },
+  'pf-depth': { html: `<p>Profondeur sous le dessus de la pièce à laquelle les flancs X et Y sont palpés.</p>` },
+  'pf-maxRadius': { html: `<p>Rayon maximal attendu du trou : course de palpage dans chaque direction depuis le départ.</p>` },
+  table: { title: 'Plateau · course machine', html: `<p>La <b>taille de travail maximale</b> de la CNC : la course de chaque axe, X × Y × Z.</p>
+    <p>Elle est dessinée en 3D. Copeau vérifie que le programme ne sort pas de cette course (y compris en Z) et refuse un « Aller ici » en dehors.</p>
+    <p>Mémorisée en coordonnées machine : elle ne bouge pas quand vous refaites le zéro.</p>` },
+  anchor: { title: 'Ancrage', html: `<p><b>Origine machine</b> : Grbl standard. Après une prise d'origine, la machine travaille de 0 vers les X, Y et Z négatifs. C'est le bon choix si votre machine a des fins de course.</p>
+    <p><b>Coin 1 fixe</b> : redimensionne le rectangle sans déplacer son coin 1.</p>
+    <p><b>Outil = coin avant gauche</b> : pour une machine sans prise d'origine, amenez l'outil au coin avant gauche puis appliquez.</p>` },
+  writeGrbl: { title: 'Écrire dans la carte', html: `<p>Enregistre la course dans Grbl : <code>$130</code> (X), <code>$131</code> (Y), <code>$132</code> (Z).</p>
+    <p>Grbl s'en sert pour les <b>limites logicielles</b> ($20=1) et la prise d'origine. Une course trop grande peut envoyer la machine en butée : mesurez-la.</p>
+    <p>Copeau demande confirmation avant d'écrire.</p>` },
+  zone: { title: 'Zone de travail', html: `<p>L'emplacement de la <b>pièce</b> sur le plateau : rectangle (2 coins opposés) ou cercle (centre + un point du bord).</p>
+    <p>Copeau vérifie que le programme tient dedans. <b>Parcourir le contour</b> fait le tour à la hauteur de survol : pratique pour vérifier le bridage.</p>` },
+  fit: { title: 'Vérification', html: `<p>Compare le cadre du programme (avec le zéro actuel) au plateau, à la course Z et à la zone de travail.</p>
+    <p>Rouge : le programme dépasse. Copeau demandera confirmation au démarrage.</p>` },
+  safeZ: { title: 'Hauteur de survol', html: `<p>Hauteur (Z travail) à laquelle la tête monte avant « Aller ici » et les parcours de contour. Elle doit dépasser les brides et la pièce.</p>` },
+  macros: { title: 'Macros', html: `<p>Une commande par ligne (G-code ou $), exécutées dans l'ordre comme si vous les tapiez dans la console.</p>
+    <p>Enregistrées sur l'ordinateur qui fait tourner Copeau (<code>data/macros.json</code>).</p>` },
+  settings: { title: 'Réglages de la carte', html: `<p>Paramètres enregistrés dans Grbl. Une mauvaise valeur peut inverser un moteur ou envoyer un axe en butée : <b>notez l'ancienne valeur</b> avant de changer.</p>
+    <p>Copeau demande confirmation à chaque écriture.</p>` },
+};
+initInfo(INFO);
 
 // ---- Utilitaires -------------------------------------------------------------
 

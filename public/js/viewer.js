@@ -317,6 +317,16 @@ export class Viewer {
       }
     };
     if (table) add(table, { line: 0x6b7280, fill: 0x2a2f38, fillOpacity: 0.35, z: -0.05 });
+    // Volume de travail de la machine (course X × Y × Z) en fil de fer.
+    if (table?.kind === 'rect' && table.zBottom !== undefined) {
+      const minX = Math.min(table.a.X, table.b.X), maxX = Math.max(table.a.X, table.b.X);
+      const minY = Math.min(table.a.Y, table.b.Y), maxY = Math.max(table.a.Y, table.b.Y);
+      const geom = new THREE.BoxGeometry(maxX - minX, maxY - minY, table.zTop - table.zBottom);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: 0x4b5563, transparent: true, opacity: 0.7 }));
+      geom.dispose();
+      edges.position.set((minX + maxX) / 2, (minY + maxY) / 2, (table.zTop + table.zBottom) / 2);
+      this.shapes.add(edges);
+    }
     if (zone) add(zone, { line: 0xf5c84b, fill: 0xf5c84b, fillOpacity: 0.07, z: 0.02 });
     if (preview) add(preview, { line: 0x3ecf8e, z: 0.04, dashed: true });
     const changed = (this.shapesBox ? JSON.stringify(this.shapesBox) : '') !== (box.isEmpty() ? '' : JSON.stringify(box));

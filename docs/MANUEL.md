@@ -73,6 +73,8 @@ Dans la liste des ports, **Simulateur Grbl (sans machine)** remplace une vraie c
 
 Sur tablette ou téléphone, les colonnes s'empilent : la vue 3D en haut, puis les commandes.
 
+Les petits boutons **i** ouvrent une bulle d'explication à côté d'un réglage. Un second clic, Échap ou un clic ailleurs la referme.
+
 ### Le badge d'état
 
 | Badge | Signification |
@@ -214,7 +216,7 @@ Le bouton **Palper Z** de la fenêtre de changement d'outil lance un palpage Z a
 
 L'onglet **Zone** décrit deux formes, dessinées dans la vue 3D :
 
-- **Plateau** (gris) : la surface physique de la machine. Toujours un rectangle.
+- **Plateau** (gris) : la **course de la machine**, c'est-à-dire sa taille de travail maximale en X × Y × Z. Le volume est dessiné en fil de fer.
 - **Zone de travail** (jaune) : l'endroit où se trouve la pièce. Rectangle ou cercle.
 
 ### Trois façons de les définir
@@ -223,17 +225,23 @@ L'onglet **Zone** décrit deux formes, dessinées dans la vue 3D :
 2. **Tracer sur la vue** : la vue passe en dessus. Cliquez un premier coin (ou le centre), un aperçu vert suit la souris, cliquez le coin opposé (ou un point du bord). Échap annule.
 3. **Saisir** les valeurs en coordonnées travail (celles des grands chiffres).
 
-### Saisir les dimensions du plateau
+### Saisir la course de la machine
 
-La ligne **Dimensions** de la carte *Plateau* accepte directement la largeur (X) et la profondeur (Y) en mm. Choisissez l'**ancrage**, puis **Appliquer** (ou Entrée) :
+La ligne **Course** de la carte *Plateau* accepte la course de chaque axe en mm (X, Y et Z). Si la machine est connectée, les champs sont préremplis avec les valeurs de la carte (`$130`, `$131`, `$132`) ; **Lire la carte** les recharge.
 
-| Ancrage | Position du plateau |
+Choisissez l'**ancrage**, puis **Appliquer** (ou Entrée) :
+
+| Ancrage | Position du volume |
 |---|---|
-| **Coin 1 fixe** | Le coin 1 ne bouge pas, le plateau est redimensionné dans son sens actuel. Choix par défaut si un plateau existe. |
-| **Origine machine (vers X− Y−)** | Du point machine 0,0 vers les X et Y négatifs, comme Grbl après une prise d'origine. |
-| **Outil = coin avant gauche** | L'outil est posé sur le coin avant gauche du plateau, qui s'étend vers X+ et Y+. |
+| **Origine machine (Grbl, vers X− Y−)** | Choix par défaut. Après une prise d'origine, Grbl travaille de 0 vers les X, Y et Z négatifs. |
+| **Coin 1 fixe** | Le coin 1 ne bouge pas, le rectangle est redimensionné dans son sens actuel. |
+| **Outil = coin avant gauche** | Pour une machine sans prise d'origine : amenez l'outil au coin avant gauche, puis appliquez. |
 
-Raccourcis : **Depuis $130 / $131** crée le plateau à partir de la course de la machine (valable après une prise d'origine) ; **Depuis le programme** crée une zone au cadre du programme chargé.
+La case **Écrire aussi dans la carte** enregistre la course dans Grbl (`$130` à `$132`), après confirmation. Grbl s'en sert pour les limites logicielles (`$20=1`) et la prise d'origine. Mesurez la course réelle : une valeur trop grande peut envoyer un axe en butée.
+
+Avec une course Z, Copeau vérifie aussi que le programme ne descend pas plus bas (ni ne monte plus haut) que ce que la machine peut atteindre avec le zéro actuel.
+
+Raccourci : **Depuis le programme** crée une zone de travail au cadre du programme chargé.
 
 Les formes sont mémorisées en **coordonnées machine** : elles restent au même endroit physique quand vous changez le zéro. Elles sont partagées entre tous les écrans et conservées après redémarrage.
 
@@ -420,7 +428,7 @@ Tous les écrans ouverts voient et commandent **la même machine** en temps rée
 | Le port n'apparaît pas | Cliquez **↻**. Vérifiez le câble (certains ne transmettent que l'alimentation). Sous Windows, installez le pilote CH340 si la carte en utilise un. |
 | « Connexion… » sans fin | Mauvaise vitesse (essayez 115200 puis 250000), ou un autre logiciel (UGS, Candle, CNCjs) occupe déjà le port. |
 | Les flèches ne font rien | La machine doit être **Prêt** : faites l'origine ou déverrouillez. Cliquez dans la vue 3D si le curseur est dans un champ de saisie. |
-| Le jog s'arrête avant la fin | Limites logicielles atteintes (`$20=1`) : c'est voulu. |
+| Le jog s'arrête avant la fin | Limites logicielles atteintes (`$20=1`) : c'est voulu. Vérifiez que la course (`$130` à `$132`) correspond à la machine. |
 | `error:22` au démarrage | Le programme commence un usinage sans vitesse d'avance `F`. Corrigez le post-processeur de la FAO. |
 | `error:20` | Commande non gérée par Grbl (souvent un code spécifique à un autre contrôleur). Retirez-la du programme. |
 | `error:9` | La machine est en alarme : voir [section 4](#4-prise-dorigine-et-alarmes). |
