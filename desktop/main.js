@@ -17,8 +17,10 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
+    // Données à côté de l'exécutable portable, sinon dans le profil utilisateur.
+    // Jamais dans le dossier de l'application : app.asar est en lecture seule.
     const portableDirectory = process.env.PORTABLE_EXECUTABLE_DIR;
-    process.env.COPEAU_DATA_DIR = portableDirectory
+    const dataDir = portableDirectory
       ? path.join(portableDirectory, 'data')
       : path.join(app.getPath('userData'), 'data');
 
@@ -27,6 +29,7 @@ if (!app.requestSingleInstanceLock()) {
         port: 0,
         host: '127.0.0.1',
         threeAddonsDir: path.join(process.resourcesPath, 'three-addons'),
+        dataDir,
       });
       const address = server.address();
       mainWindow = new BrowserWindow({

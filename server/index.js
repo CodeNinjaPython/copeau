@@ -15,9 +15,12 @@ const PORT = Number(process.env.PORT || 8000);
 // Par défaut seul cet ordinateur peut piloter la machine.
 // HOST=0.0.0.0 pour y accéder depuis une tablette du réseau local.
 const HOST = process.env.HOST || '127.0.0.1';
-const DATA_DIR = path.resolve(process.env.COPEAU_DATA_DIR || path.join(root, 'data'));
-const MACROS_FILE = path.join(DATA_DIR, 'macros.json');
-const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+// Dossier de données résolu à chaque usage, pas au chargement du module :
+// l'application de bureau importe ce fichier avant de fixer COPEAU_DATA_DIR.
+// Figé trop tôt, il pointait dans app.asar (lecture seule) -> ENOTDIR.
+const dataDir = () => path.resolve(process.env.COPEAU_DATA_DIR || path.join(root, 'data'));
+const macrosFile = () => path.join(dataDir(), 'macros.json');
+const configFile = () => path.join(dataDir(), 'config.json');
 const SIMULATOR = 'simulateur';
 const THREE_DIR = path.join(root, 'node_modules/three');
 
@@ -76,25 +79,27 @@ const DEFAULT_MACROS = [
 ];
 
 async function loadMacros() {
-  try { return JSON.parse(await fs.readFile(MACROS_FILE, 'utf8')); }
+  try { return JSON.parse(await fs.readFile(macrosFile(), 'utf8')); }
   catch { return DEFAULT_MACROS; }
 }
 async function saveMacros(list) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(MACROS_FILE, JSON.stringify(list, null, 2));
+  await fs.mkdir(dataDir(), { recursive: true });
+  await fs.writeFile(macrosFile(), JSON.stringify(list, null, 2));
 }
 
 // ---- Configuration partagée (plateau, zone de travail) ----------------------
 
 let config = {};
-try { config = JSON.parse(await fs.readFile(CONFIG_FILE, 'utf8')); } catch {}
+async function loadConfig() {
+  try { config = JSON.parse(await fs.readFile(configFile(), 'utf8')); } catch { config = {}; }
+}
 const CONFIG_KEYS = ['zones'];
 
 async function setConfig(key, value) {
   if (!CONFIG_KEYS.includes(key)) throw new Error(`Clé de configuration inconnue : ${key}`);
   config = { ...config, [key]: value };
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
+  await fs.mkdir(dataDir(), { recursive: true });
+  await fs.writeFile(configFile(), JSON.stringify(config, null, 2));
   broadcast({ t: 'config', config });
 }
 
@@ -275,8 +280,10 @@ wss.on('connection', (ws) => {
   ws.on('close', () => { if (ws.jogging) grbl.realtime('jogCancel'); });
 });
 
-export function startServer({ port = PORT, host = HOST, threeAddonsDir } = {}) {
+export async function startServer({ port = PORT, host = HOST, threeAddonsDir, dataDir: dir } = {}) {
   if (threeAddonsDir) process.env.COPEAU_THREE_ADDONS_DIR = threeAddonsDir;
+  if (dir) process.env.COPEAU_DATA_DIR = dir;
+  await loadConfig();
   return new Promise((resolve, reject) => {
     const onError = (error) => {
       server.off('listening', onListening);
