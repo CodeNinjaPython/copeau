@@ -1,0 +1,26 @@
+name: Windows portable
+
+# Fabrique Copeau-Portable-x.y.z.exe sur une machine Windows de GitHub.
+# Le fichier se télécharge dans l'onglet Actions > ce workflow > Artifacts.
+on:
+  push:
+    branches: [main, fix-portable-enotdir]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:portable
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Copeau-Portable
+          path: dist/*.exe
+          if-no-files-found: error

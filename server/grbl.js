@@ -56,6 +56,7 @@ export class GrblController extends EventEmitter {
     this.offsets = {};
     this.lastProbe = null;
     this.statusWaiters = [];
+    this.spindleHeld = false; // broche coupée par Copeau pendant une pause
   }
 
   get connected() { return !!this.transport; }
@@ -81,7 +82,7 @@ export class GrblController extends EventEmitter {
     const t = this.transport;
     this.transport = null;
     this.failPending(new Error(reason || 'Déconnecté'));
-    if (this.job && ['running', 'paused', 'toolchange', 'finishing'].includes(this.job.state)) {
+    if (this.job && ['running', 'paused', 'spinup', 'toolchange', 'finishing'].includes(this.job.state)) {
       this.job.state = 'stopped';
       this.job.error = reason || 'Déconnecté';
     }
@@ -115,7 +116,7 @@ export class GrblController extends EventEmitter {
       // Grbl vide son tampon de réception : toutes les lignes en vol sont perdues.
       this.ready = false;
       this.failPending(new Error('Reset'));
-      if (this.job && ['running', 'paused', 'toolchange', 'finishing', 'stopping'].includes(this.job.state)) {
+      if (this.job && ['running', 'paused', 'spinup', 'toolchange', 'finishing', 'stopping'].includes(this.job.state)) {
         this.job.state = 'stopped';
         this.emitJob();
       }
@@ -144,7 +145,7 @@ export class GrblController extends EventEmitter {
       const code = Number(m[1]);
       this.log('err', `Alarme ${code} : ${alarmText(code)}`);
       this.status.state = 'Alarm';
-      if (this.job && ['running', 'paused', 'finishing'].includes(this.job.state)) {
+      if (this.job && ['running', 'paused', 'spinup', 'finishing'].includes(this.job.state)) {
         this.job.state = 'stopped';
         this.job.error = `Alarme ${code} : ${alarmText(code)}`;
         this.emitJob();
@@ -215,6 +216,9 @@ export class GrblController extends EventEmitter {
     const add3 = (a, b) => ({ X: a.X + b.X, Y: a.Y + b.Y, Z: a.Z + b.Z });
     if (mpos) { s.mpos = mpos; s.wpos = sub3(mpos, s.wco); }
     else if (wpos) { s.wpos = wpos; s.mpos = add3(wpos, s.wco); }
+    // Reprise faite ailleurs (bouton de la machine, autre logiciel) : Grbl a
+    // déjà rallumé la broche.
+    if (this.spindleHeld && state !== 'Hold') this.spindleHeld = false;
 
     if (this.job?.state === 'finishing' && state === 'Idle' && !this.inflight.length) {
       this.job.state = 'done';
@@ -300,7 +304,7 @@ export class GrblController extends EventEmitter {
   // ---- Jobs ------------------------------------------------------------
 
   loadJob(name, text) {
-    if (this.job && ['running', 'paused', 'toolchange', 'finishing', 'stopping'].includes(this.job.state)) {
+    if (this.job && ['running', 'paused', 'spinup', 'toolchange', 'finishing', 'stopping'].includes(this.job.state)) {
       throw new Error('Un job est en cours');
     }
     this.job = {
@@ -315,7 +319,7 @@ export class GrblController extends EventEmitter {
     const j = this.job;
     if (!j) throw new Error('Aucun job chargé');
     if (!this.ready) throw new Error('Machine non prête');
-    if (['running', 'paused', 'toolchange', 'finishing', 'stopping'].includes(j.state)) throw new Error('Job déjà en cours');
+    if (['running', 'paused', 'spinup', 'toolchange', 'finishing', 'stopping'].includes(j.state)) throw new Error('Job déjà en cours');
     if (this.status.state !== 'Idle') throw new Error(`La machine doit être Idle (état : ${this.status.state})`);
     from = Math.max(0, Math.min(Math.floor(from), j.lines.length - 1));
     j.prelude = from > 0 ? buildResume(j.lines, from, opts).lines : [];
@@ -383,17 +387,53 @@ export class GrblController extends EventEmitter {
     this.pump();
   }
 
-  pauseJob() {
+  pauseJob({ stopSpindle = false } = {}) {
     if (this.job?.state !== 'running') return;
     this.job.state = 'paused';
     this.realtime('hold');
     this.emitJob();
+    if (stopSpindle) this.stopSpindleInPause().catch((e) => this.log('err', e.message));
   }
 
-  resumeJob() {
-    if (this.job?.state !== 'paused') return;
-    this.job.state = 'running';
-    this.job.error = null;
+  // Coupe la broche pendant une pause. Grbl n'accepte « spindle stop » (0x9E)
+  // qu'une fois le mouvement complètement arrêté (Hold:0) : on attend cet état.
+  async stopSpindleInPause() {
+    if (this.spindleHeld) return;
+    const deadline = Date.now() + 8000;
+    let s = this.status;
+    while (!(s.state === 'Hold' && s.subState === '0')) {
+      if (Date.now() > deadline || !['Hold', 'Run'].includes(s.state)) {
+        throw new Error('Broche non coupée : la machine doit être en pause complète');
+      }
+      s = await this.nextStatus();
+    }
+    this.realtime('spindleStop');
+    this.spindleHeld = true;
+    this.log('info', 'Broche coupée pendant la pause');
+    this.emitState();
+    this.emitJob();
+  }
+
+  // Reprise après une pause (ou un M0). Si la broche a été coupée : rallumage,
+  // attente de la montée en vitesse, puis seulement reprise du mouvement.
+  async resumeJob({ spinUp = 3 } = {}) {
+    const j = this.job;
+    const programPause = j?.state === 'running' && this.status.state === 'Hold';
+    if (j?.state !== 'paused' && !programPause) return;
+    if (this.spindleHeld) {
+      j.state = 'spinup';
+      j.spinUpUntil = Date.now() + spinUp * 1000;
+      this.realtime('spindleStop'); // second appui : Grbl rallume la broche
+      this.spindleHeld = false;
+      this.log('info', `Broche rallumée, reprise dans ${spinUp} s`);
+      this.emitState();
+      this.emitJob();
+      await new Promise((r) => setTimeout(r, spinUp * 1000));
+      if (j.state !== 'spinup') return; // arrêté pendant l'attente
+    }
+    j.state = 'running';
+    j.error = null;
+    j.spinUpUntil = null;
     this.realtime('start');
     this.emitJob();
     this.pump();
@@ -403,7 +443,7 @@ export class GrblController extends EventEmitter {
   // Un reset pendant un mouvement ferait perdre la position (alarme 3).
   async stopJob() {
     const j = this.job;
-    if (!j || !['running', 'paused', 'toolchange', 'finishing'].includes(j.state)) return;
+    if (!j || !['running', 'paused', 'spinup', 'toolchange', 'finishing'].includes(j.state)) return;
     j.state = 'stopping';
     this.emitJob();
     this.realtime('hold');
@@ -424,7 +464,7 @@ export class GrblController extends EventEmitter {
     return {
       connected: this.connected, port: this.portName, ready: this.ready, version: this.version,
       status: this.status, modal: this.modal, offsets: this.offsets,
-      queue: this.queue.length, inflight: this.inflight.length,
+      queue: this.queue.length, inflight: this.inflight.length, spindleHeld: this.spindleHeld,
     };
   }
 
@@ -434,6 +474,7 @@ export class GrblController extends EventEmitter {
     return {
       name: j.name, total: j.lines.length, acked: j.acked, sent: j.next, startIndex: j.startIndex,
       state: j.state, error: j.error, tool: j.tool, startedAt: j.startedAt, finishedAt: j.finishedAt,
+      spinUpUntil: j.spinUpUntil ?? null, spindleHeld: this.spindleHeld,
     };
   }
 
