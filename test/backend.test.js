@@ -111,3 +111,25 @@ test('palpage sans contact : erreur et alarme', async () => {
     assert.equal(c.status.state, 'Alarm');
   } finally { close(); }
 });
+
+test('pause : broche coupée puis rallumée avant la reprise', async () => {
+  const { c, close } = await setup();
+  try {
+    const prog = ['G21G90', 'M3S12000', 'G0Z1', ...Array.from({ length: 30 }, (_, i) => `G1X${i % 2 ? 20 : 0}Y${i}F300`), 'M5', 'M30'].join('\n');
+    c.loadJob('broche.nc', prog);
+    c.runJob(0);
+    await waitFor(() => c.status.state === 'Run' && c.status.speed > 0);
+    c.pauseJob({ stopSpindle: true });
+    await waitFor(() => c.spindleHeld);
+    await c.nextStatus();
+    assert.equal(c.status.speed, 0, 'broche arrêtée pendant la pause');
+    const resumed = c.resumeJob({ spinUp: 0.3 });
+    assert.equal(c.job.state, 'spinup');
+    await c.nextStatus();
+    assert.equal(c.status.state, 'Hold', 'le mouvement attend la montée en vitesse');
+    assert.ok(c.status.speed > 0, 'broche rallumée avant de bouger');
+    await resumed;
+    assert.equal(c.job.state, 'running');
+    await waitFor(() => c.job.state === 'done', 30000);
+  } finally { close(); }
+});

@@ -178,6 +178,20 @@ const handlers = {
 
   // Amène la tête en X/Y (repère travail), après une éventuelle montée en Z.
   // Tout passe en jog : interruptible par Échap / le bouton stop.
+  // Retour au zéro établi : montée au Z de survol si besoin, X0 Y0, puis
+  // descente lente jusqu'à Z0. Tout en jog : Échap annule toute la séquence.
+  async gotoOrigin({ liftZ, feed, plungeFeed }) {
+    const f = Number(feed) || 1000;
+    const pf = Math.min(f, Number(plungeFeed) || 300);
+    const lift = Number(liftZ);
+    if (Number.isFinite(lift) && grbl.status.wpos.Z < lift) {
+      await grbl.cmd(`$J=G90G21Z${lift.toFixed(3)}F${f}`, 'jog');
+    }
+    grbl.log('info', 'Retour à l\'origine X0 Y0 Z0');
+    await grbl.cmd(`$J=G90G21X0Y0F${f}`, 'jog');
+    await grbl.cmd(`$J=G90G21Z0F${pf}`, 'jog');
+  },
+
   async jogTo({ X, Y, liftZ, feed }) {
     const f = Number(feed) || 1000;
     if (![X, Y].every(Number.isFinite)) throw new Error('Cible invalide');
@@ -225,8 +239,12 @@ const handlers = {
   async run({ from = 0, toolChange = true, spinUp = 3 }) {
     grbl.runJob(Number(from), { toolChange, spinUpSeconds: Number(spinUp) });
   },
-  async pause() { grbl.pauseJob(); },
-  async resume() { grbl.resumeJob(); },
+  async pause({ stopSpindle = false }) { grbl.pauseJob({ stopSpindle: !!stopSpindle }); },
+  async resume({ spinUp = 3 }) {
+    const s = Math.max(0, Math.min(30, Number(spinUp) || 0));
+    grbl.resumeJob({ spinUp: s }).catch((e) => grbl.log('err', e.message));
+  },
+  async spindleStop() { await grbl.stopSpindleInPause(); },
   async stop() { await grbl.stopJob(); },
   async toolDone() { grbl.continueAfterToolChange(); },
 

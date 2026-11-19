@@ -89,7 +89,7 @@ export function startTour(steps, { onClose, start = 0 } = {}) {
 
   // Capture : les flèches pilotent la démo, pas la machine.
   function onKey(e) {
-    if (['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Escape', 'Enter'].includes(e.key)) {
+    if (['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', '+', '=', '-', 'Escape', 'Enter'].includes(e.key)) {
       e.preventDefault();
       e.stopImmediatePropagation();
     }
