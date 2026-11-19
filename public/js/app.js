@@ -745,6 +745,55 @@ function renderZoneCard(target) {
         <span></span>
         <button class="ghost small" data-cap="edge" title="Rayon = distance entre le centre et la position actuelle">Point du bord</button></div>`
     : pointRow('Coin 1', 'a', d.a, 'Capturer') + pointRow('Coin 2', 'b', d.b, 'Capturer');
+  if (target === 'table') renderTableDims(card, saved);
+}
+
+// Saisie directe des dimensions du plateau (largeur X × profondeur Y).
+function renderTableDims(card, saved) {
+  const box = card.querySelector('[data-dims]');
+  if (box.contains(document.activeElement)) return;
+  const w = saved ? r3(Math.abs(saved.b.X - saved.a.X)) : '';
+  const h = saved ? r3(Math.abs(saved.b.Y - saved.a.Y)) : '';
+  const anchor = saved || drafts.table.a ? 'coin1' : S.machine.ready ? 'machine' : 'tool';
+  box.innerHTML = `
+    <div class="zone-pt"><span>Dimensions</span>
+      <input type="number" step="any" min="1" data-dim="W" placeholder="Largeur X" value="${w}" class="${w ? '' : 'empty'}" title="Largeur en X (mm)">
+      <input type="number" step="any" min="1" data-dim="D" placeholder="Profondeur Y" value="${h}" class="${h ? '' : 'empty'}" title="Profondeur en Y (mm)">
+      <button class="primary small" data-dims-apply>Appliquer</button></div>
+    <div class="zone-dims-anchor"><span>Ancrage</span>
+      <select data-anchor>
+        <option value="coin1"${anchor === 'coin1' ? ' selected' : ''}>Coin 1 fixe</option>
+        <option value="machine"${anchor === 'machine' ? ' selected' : ''}>Origine machine (vers X− Y−)</option>
+        <option value="tool"${anchor === 'tool' ? ' selected' : ''}>Outil = coin avant gauche</option>
+      </select></div>`;
+}
+
+function applyTableDims(card) {
+  const W = Number(card.querySelector('[data-dim="W"]').value);
+  const D = Number(card.querySelector('[data-dim="D"]').value);
+  if (!(W >= 1) || !(D >= 1)) return toast('Indiquez une largeur et une profondeur d\'au moins 1 mm', 'err');
+  const anchor = card.querySelector('[data-anchor]').value;
+  let a, b;
+  if (anchor === 'machine') {
+    a = { X: 0, Y: 0 };
+    b = { X: -W, Y: -D };
+    toast('Valable si la prise d\'origine a été faite', 'info');
+  } else if (anchor === 'tool') {
+    if (!S.machine.ready) return toast('Connectez la machine pour utiliser la position de l\'outil', 'err');
+    const m = S.machine.status.mpos;
+    a = { X: r3(m.X), Y: r3(m.Y) };
+    b = { X: r3(m.X + W), Y: r3(m.Y + D) };
+  } else {
+    // Coin 1 fixe, on garde le sens actuel du rectangle.
+    const cur = drafts.table;
+    if (!cur.a) return toast('Capturez ou saisissez d\'abord le coin 1', 'err');
+    const sx = cur.b && cur.b.X < cur.a.X ? -1 : 1, sy = cur.b && cur.b.Y < cur.a.Y ? -1 : 1;
+    a = cur.a;
+    b = { X: r3(a.X + sx * W), Y: r3(a.Y + sy * D) };
+  }
+  drafts.table = { kind: 'rect', a, b };
+  document.activeElement?.blur();
+  commitDraft('table');
 }
 
 // offset : décalage du programme à tester (mode « Placer »), repère travail.
@@ -861,6 +910,8 @@ for (const card of $$('.zone-card[data-target]')) {
       zoneKind = 'rect';
       drafts.zone = { kind: 'rect', a: toMachine({ X: i.min.X, Y: i.min.Y }), b: toMachine({ X: i.max.X, Y: i.max.Y }) };
       commitDraft('zone');
+    } else if ('dimsApply' in b.dataset) {
+      applyTableDims(card);
     } else if ('outline' in b.dataset) {
       const z = shapeToWork(S.zones.zone);
       const pts = outline(z, 48);
@@ -882,7 +933,11 @@ for (const card of $$('.zone-card[data-target]')) {
     input.blur();
     commitDraft(target);
   });
-  card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.target.blur(); });
+  card.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+    if (e.target.dataset.dim) { e.preventDefault(); applyTableDims(card); return; }
+    e.target.blur();
+  });
 }
 
 function runPath(points) {

@@ -223,6 +223,16 @@ L'onglet **Zone** décrit deux formes, dessinées dans la vue 3D :
 2. **Tracer sur la vue** : la vue passe en dessus. Cliquez un premier coin (ou le centre), un aperçu vert suit la souris, cliquez le coin opposé (ou un point du bord). Échap annule.
 3. **Saisir** les valeurs en coordonnées travail (celles des grands chiffres).
 
+### Saisir les dimensions du plateau
+
+La ligne **Dimensions** de la carte *Plateau* accepte directement la largeur (X) et la profondeur (Y) en mm. Choisissez l'**ancrage**, puis **Appliquer** (ou Entrée) :
+
+| Ancrage | Position du plateau |
+|---|---|
+| **Coin 1 fixe** | Le coin 1 ne bouge pas, le plateau est redimensionné dans son sens actuel. Choix par défaut si un plateau existe. |
+| **Origine machine (vers X− Y−)** | Du point machine 0,0 vers les X et Y négatifs, comme Grbl après une prise d'origine. |
+| **Outil = coin avant gauche** | L'outil est posé sur le coin avant gauche du plateau, qui s'étend vers X+ et Y+. |
+
 Raccourcis : **Depuis $130 / $131** crée le plateau à partir de la course de la machine (valable après une prise d'origine) ; **Depuis le programme** crée une zone au cadre du programme chargé.
 
 Les formes sont mémorisées en **coordonnées machine** : elles restent au même endroit physique quand vous changez le zéro. Elles sont partagées entre tous les écrans et conservées après redémarrage.

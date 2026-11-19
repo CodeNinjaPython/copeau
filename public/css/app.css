@@ -261,6 +261,9 @@ input[type=range] { width: 100%; accent-color: var(--accent); padding: 0; border
 .zone-pt > span { color: var(--muted); font-size: 12px; }
 .zone-pt input { font-family: var(--mono); padding: 6px 8px; width: 100%; }
 .zone-pt input.empty { border-style: dashed; }
+.zone-dims-anchor { display: grid; grid-template-columns: 70px 1fr; gap: 6px; align-items: center; }
+.zone-dims-anchor > span { color: var(--muted); font-size: 12px; }
+.zone-dims-anchor select { padding: 6px 8px; width: 100%; }
 .fit-status.ok { color: var(--ok); }
 .fit-status.bad { color: #ff8a87; }
 .viewer-hint.drawing { color: var(--ok); font-size: 14px; font-weight: 600; }
