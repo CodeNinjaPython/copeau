@@ -180,6 +180,15 @@ const handlers = {
   // Tout passe en jog : interruptible par Échap / le bouton stop.
   // Retour au zéro établi : montée au Z de survol si besoin, X0 Y0, puis
   // descente lente jusqu'à Z0. Tout en jog : Échap annule toute la séquence.
+  // Ramène un seul axe à 0 (repère travail), en jog. En descente, Z va lentement.
+  async axisToZero({ axis, feed, plungeFeed }) {
+    if (!['X', 'Y', 'Z'].includes(axis)) throw new Error('Axe invalide');
+    let f = Number(feed) || 1000;
+    if (axis === 'Z' && grbl.status.wpos.Z > 0) f = Math.min(f, Number(plungeFeed) || 300);
+    grbl.log('info', `Retour de ${axis} à l'origine`);
+    await grbl.cmd(`$J=G90G21${axis}0F${f}`, 'jog');
+  },
+
   async gotoOrigin({ liftZ, feed, plungeFeed }) {
     const f = Number(feed) || 1000;
     const pf = Math.min(f, Number(plungeFeed) || 300);

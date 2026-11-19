@@ -119,7 +119,7 @@ textarea { width: 100%; resize: vertical; font-family: var(--mono); font-size: 1
 .dro-head b { color: var(--text); }
 .dro-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .dro-row {
-  display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 10px;
+  display: grid; grid-template-columns: 28px 1fr auto auto; align-items: center; gap: 8px;
   background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 6px 6px 6px 12px;
 }
@@ -128,6 +128,7 @@ textarea { width: 100%; resize: vertical; font-family: var(--mono); font-size: 1
 .dro-val { font-family: var(--mono); font-size: 28px; font-variant-numeric: tabular-nums; text-align: right; line-height: 1.1; }
 .dro-val small { display: block; font-size: 11px; color: var(--muted); }
 .origin-row { margin-top: 8px; }
+.dro-row > .dro-home { min-width: 0; width: 40px; padding: 10px 0; font-size: 16px; }
 .dro-row > button { padding: 10px 10px; min-width: 64px; font-weight: 600; }
 .dro-num {
   font: inherit; background: transparent; border: 1px dashed transparent; border-radius: 6px;

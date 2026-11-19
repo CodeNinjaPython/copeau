@@ -169,6 +169,7 @@ Cliquez sur le chiffre d'un axe : il devient un champ. Tapez la valeur que la po
 
 - **⌂ Origine** ramène l'outil exactement au zéro établi. Il monte d'abord à la hauteur de survol (onglet Zone, 5 mm par défaut) s'il est plus bas, rejoint X0 Y0, puis descend lentement jusqu'à Z0 (300 mm/min au plus). Pratique pour vérifier un zéro avant de lancer.
 - **→ X0 Y0** fait la même chose sans descendre : l'outil s'arrête au-dessus de l'origine, à la hauteur de survol.
+- Le **⌂** de chaque ligne X, Y ou Z ramène **seulement cet axe** à 0, les autres ne bougent pas. Z descend lentement vers Z0 (300 mm/min au plus) ; X et Y se déplacent à la hauteur actuelle, avec une confirmation si l'outil est sous Z0.
 
 Les deux passent par le jog : **Échap** ou **■** arrêtent le mouvement à tout moment.
 
