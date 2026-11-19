@@ -43,6 +43,7 @@
     "win": {
       "target": "portable",
       "artifactName": "Copeau-Portable-${version}.${ext}"
-    }
+    },
+    "npmRebuild": false
   }
 }
