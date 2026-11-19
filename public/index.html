@@ -154,12 +154,14 @@
       <div class="job-bar" id="job-bar">
         <div class="job-name"><span id="job-name">Aucun programme</span><span class="muted small" id="job-meta"></span></div>
         <div class="progress"><div id="job-progress"></div></div>
-        <div class="job-times muted small"><span id="job-elapsed"></span><span id="job-remaining"></span></div>
+        <div class="job-times muted small"><span id="job-elapsed"></span><span id="job-remaining"></span>
+          <label class="check small pause-opt"><input type="checkbox" id="opt-pause-spindle"> Couper la broche en pause <button type="button" class="ibtn" data-info="pauseSpindle" aria-label="Plus d'informations" aria-expanded="false">i</button></label></div>
         <div class="job-actions">
           <button type="button" class="ibtn" data-info="job" aria-label="Plus d'informations" aria-expanded="false">i</button>
           <label class="ghost file-btn">Ouvrir<input id="file-input" type="file" accept=".nc,.gcode,.ngc,.tap,.gc,.cnc,.txt" hidden></label>
           <button id="btn-run" class="primary">Démarrer</button>
           <button id="btn-pause" class="warn">Pause</button>
+          <button id="btn-spindle" class="ghost" hidden title="Arrêter la broche pendant la pause">⏻ Couper la broche</button>
           <button id="btn-stop" class="danger">Arrêter</button>
         </div>
       </div>

@@ -229,8 +229,12 @@ const handlers = {
   async run({ from = 0, toolChange = true, spinUp = 3 }) {
     grbl.runJob(Number(from), { toolChange, spinUpSeconds: Number(spinUp) });
   },
-  async pause() { grbl.pauseJob(); },
-  async resume() { grbl.resumeJob(); },
+  async pause({ stopSpindle = false }) { grbl.pauseJob({ stopSpindle: !!stopSpindle }); },
+  async resume({ spinUp = 3 }) {
+    const s = Math.max(0, Math.min(30, Number(spinUp) || 0));
+    grbl.resumeJob({ spinUp: s }).catch((e) => grbl.log('err', e.message));
+  },
+  async spindleStop() { await grbl.stopSpindleInPause(); },
   async stop() { await grbl.stopJob(); },
   async toolDone() { grbl.continueAfterToolChange(); },
 

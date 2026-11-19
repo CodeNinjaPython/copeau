@@ -198,6 +198,8 @@ textarea { width: 100%; resize: vertical; font-family: var(--mono); font-size: 1
 .job-times { grid-column: 1; display: flex; gap: 16px; font-family: var(--mono); }
 .job-actions { grid-column: 2; grid-row: 1; display: flex; gap: 8px; }
 .job-actions button, .file-btn { min-width: 92px; }
+.pause-opt { margin-left: auto; font-family: system-ui, -apple-system, sans-serif; }
+#btn-spindle.held { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
 .file-btn {
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px;

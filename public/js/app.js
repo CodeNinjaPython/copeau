@@ -231,7 +231,7 @@ function updateEnabled() {
   const m = S.machine;
   const state = m.status.state;
   const idle = m.ready && state === 'Idle';
-  const jobActive = ['running', 'paused', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
+  const jobActive = ['running', 'paused', 'spinup', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
   const canJog = m.ready && (state === 'Idle' || state === 'Jog') && !(jobActive && S.job.state !== 'toolchange');
   $$('[data-jog], #jog-stop').forEach((b) => (b.disabled = !canJog));
   $$('[data-zero], [data-edit], #btn-goto-zero, #btn-goto-origin').forEach((b) => (b.disabled = !idle || (jobActive && S.job.state !== 'toolchange')));
@@ -247,7 +247,16 @@ function updateEnabled() {
   const machineHeld = state === 'Hold';
   const pauseBtn = $('#btn-pause');
   pauseBtn.disabled = !(j && (j.state === 'running' || j.state === 'paused'));
-  pauseBtn.textContent = j?.state === 'paused' || (j?.state === 'running' && machineHeld) ? 'Reprendre' : 'Pause';
+  pauseBtn.textContent = j?.state === 'spinup' ? 'Redémarrage…'
+    : j?.state === 'paused' || (j?.state === 'running' && machineHeld) ? 'Reprendre' : 'Pause';
+  // Broche : coupable seulement quand le mouvement est arrêté (pause ou M0).
+  const inPause = j && (j.state === 'paused' || (j.state === 'running' && machineHeld));
+  const spBtn = $('#btn-spindle');
+  spBtn.hidden = !inPause && j?.state !== 'spinup';
+  spBtn.classList.toggle('held', !!m.spindleHeld);
+  spBtn.textContent = m.spindleHeld ? '⏻ Broche coupée' : '⏻ Couper la broche';
+  spBtn.title = m.spindleHeld ? 'La broche se rallumera à la reprise' : 'Arrêter la broche pendant la pause';
+  spBtn.disabled = !!m.spindleHeld || !inPause || !(state === 'Hold' && m.status.subState === '0');
   $('#btn-stop').disabled = !jobActive || j.state === 'stopping';
   $('#btn-probe').disabled = !idle || (jobActive && j.state !== 'toolchange');
   $('#btn-place').disabled = !canRun && !$('#btn-place').classList.contains('active');
@@ -431,7 +440,7 @@ wrap.addEventListener('dragleave', (e) => { if (!wrap.contains(e.relatedTarget))
 wrap.addEventListener('drop', (e) => { e.preventDefault(); wrap.classList.remove('dragging'); loadFile(e.dataTransfer.files[0]); });
 
 const JOB_STATE = {
-  loaded: 'Prêt', running: 'En cours', paused: 'En pause', toolchange: 'Changement d\'outil',
+  loaded: 'Prêt', running: 'En cours', paused: 'En pause', spinup: 'Redémarrage broche', toolchange: 'Changement d\'outil',
   finishing: 'Finition', stopping: 'Arrêt…', stopped: 'Arrêté', done: 'Terminé',
 };
 
@@ -464,7 +473,9 @@ function toastOnce(msg) {
 function renderTimes() {
   const j = S.job;
   if (!j) return;
-  const label = JOB_STATE[j.state] || j.state;
+  let label = JOB_STATE[j.state] || j.state;
+  if (j.state === 'spinup' && j.spinUpUntil) label += ` (${Math.max(0, Math.ceil((j.spinUpUntil - Date.now()) / 1000))} s)`;
+  else if (j.state === 'paused' && j.spindleHeld) label += ', broche coupée';
   const pct = j.total ? Math.round((j.acked / j.total) * 100) : 0;
   if (!j.startedAt || j.state === 'loaded') {
     $('#job-elapsed').textContent = label;
@@ -475,7 +486,7 @@ function renderTimes() {
   const elapsed = (end - j.startedAt) / 1000;
   $('#job-elapsed').textContent = `${label} · ${pct}% · ${j.acked}/${j.total} · ${fmtDuration(elapsed)}`;
   const doneFrac = (j.acked - j.startIndex) / Math.max(1, j.total - j.startIndex);
-  const active = ['running', 'paused', 'toolchange'].includes(j.state);
+  const active = ['running', 'paused', 'spinup', 'toolchange'].includes(j.state);
   $('#job-remaining').textContent = active && doneFrac > 0.02 ? `reste ≈ ${fmtDuration(elapsed / doneFrac - elapsed)}` : '';
 }
 setInterval(renderTimes, 1000);
@@ -486,12 +497,19 @@ $('#btn-run').onclick = () => {
   if (S.info && Number.isFinite(S.info.min.Z) && S.info.min.Z < 0 && !confirm('Démarrer l\'usinage ? Vérifiez l\'origine, le serrage et la broche.')) return;
   act('run', { from: 0 }).catch(() => {});
 };
+$('#opt-pause-spindle').checked = store.get('pauseSpindle', false);
+$('#opt-pause-spindle').onchange = (e) => store.set('pauseSpindle', e.target.checked);
+const spinUpSeconds = () => Math.max(0, Number($('#resume-spinup').value) || 3);
 $('#btn-pause').onclick = () => {
   const j = S.job;
-  if (j?.state === 'paused') act('resume').catch(() => {});
-  else if (j?.state === 'running' && S.machine.status.state === 'Hold') rt('start'); // M0 / M1
-  else act('pause').catch(() => {});
+  // Reprise après une pause ou un M0 : le serveur rallume la broche si besoin.
+  if (j?.state === 'paused' || (j?.state === 'running' && S.machine.status.state === 'Hold')) {
+    act('resume', { spinUp: spinUpSeconds() }).catch(() => {});
+  } else {
+    act('pause', { stopSpindle: $('#opt-pause-spindle').checked }).catch(() => {});
+  }
 };
+$('#btn-spindle').onclick = () => act('spindleStop').then(() => toast('Broche coupée : elle se rallumera à la reprise', 'ok')).catch(() => {});
 $('#btn-stop').onclick = () => act('stop').catch(() => {});
 $('#btn-tool-continue').onclick = () => act('toolDone').catch(() => {});
 $('#btn-tool-stop').onclick = () => act('stop').catch(() => {});
@@ -1137,7 +1155,7 @@ const fmtClock = (sec) => {
 
 function openPreview() {
   if (!S.lines.length) return toast('Chargez d\'abord un programme', 'err');
-  const jobActive = ['running', 'paused', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
+  const jobActive = ['running', 'paused', 'spinup', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
   if (jobActive) return toast('Simulation indisponible pendant un usinage', 'err');
   closeGoto();
   stopDraw();
@@ -1187,7 +1205,7 @@ $('#pb-stock').onchange = (e) => preview.setShowStock(e.target.checked);
 let placeDelta = null;
 function canPlace() {
   const j = S.job;
-  const jobActive = ['running', 'paused', 'finishing', 'stopping', 'toolchange'].includes(j?.state);
+  const jobActive = ['running', 'paused', 'spinup', 'finishing', 'stopping', 'toolchange'].includes(j?.state);
   return S.machine.ready && S.machine.status.state === 'Idle' && !jobActive;
 }
 function startPlace() {
@@ -1348,7 +1366,7 @@ async function tryDemo() {
     if (m.connected && m.port !== 'simulateur') {
       return toast('Une vraie machine est connectée : déconnectez-la pour essayer le simulateur.', 'err');
     }
-    if (['running', 'paused', 'toolchange', 'finishing'].includes(S.job?.state)) return toast('Un usinage est en cours', 'err');
+    if (['running', 'paused', 'spinup', 'toolchange', 'finishing'].includes(S.job?.state)) return toast('Un usinage est en cours', 'err');
     toast('Préparation de la démo…');
     if (!m.connected) {
       $('#port').value = 'simulateur';
@@ -1491,6 +1509,9 @@ const INFO = {
   sim: { title: 'Simulation', html: `<p>Tout se passe dans le navigateur : <b>rien n'est envoyé à la machine</b>.</p>
     <p>Suppose une fraise droite du Ø indiqué et un dessus de pièce à Z0. Les accélérations ne sont pas simulées : la durée réelle sera un peu plus longue.</p>
     <p><kbd>Espace</kbd> : lecture / pause. Le curseur va en avant comme en arrière.</p>` },
+  pauseSpindle: { title: 'Broche pendant la pause', html: `<p>Cochée, la broche s'arrête à chaque <b>Pause</b>, dès que le mouvement est complètement arrêté. Sinon, le bouton <b>⏻ Couper la broche</b> apparaît pendant la pause.</p>
+    <p>À la <b>reprise</b>, Copeau rallume la broche, attend sa montée en vitesse (réglage <i>Attente broche</i> de l'onglet Reprise, 3 s par défaut), puis seulement reprend le mouvement.</p>
+    <p>Pratique pour dégager un copeau ou vérifier une passe. Ne remplace pas l'arrêt d'urgence.</p>` },
   job: { title: 'Programme', html: `<p><b>Durée estimée</b> d'après les avances du fichier ; la durée réelle est un peu plus longue.</p>
     <p><b>Pause</b> : arrêt immédiat du mouvement. <b>Arrêter</b> : ralentit puis vide la carte, la position est conservée.</p>
     <p>Une erreur de la carte met le job en pause au lieu de continuer.</p>` },

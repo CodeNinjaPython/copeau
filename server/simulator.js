@@ -76,6 +76,7 @@ export class GrblSimulator extends EventEmitter {
     this.rx = [];
     this.lineBuf = '';
     this.hold = false;
+    this.spindleStopOvr = false;
     this.waiting = false;
     this.planned = { ...this.mpos };
     this.syncWork();
@@ -131,7 +132,8 @@ export class GrblSimulator extends EventEmitter {
         if (this.planner.some((x) => x.jog)) this.cancelJog();
         else if (this.planner.length) this.hold = true;
         return true;
-      case 0x7e: this.hold = false; return true;
+      case 0x7e: this.hold = false; this.spindleStopOvr = false; return true; // Grbl rallume la broche à la reprise
+      case 0x9e: if (this.hold) this.spindleStopOvr = !this.spindleStopOvr; return true;
       case 0x18: this.softReset(); return true;
       case 0x85: this.cancelJog(); return true;
       case 0x90: this.ov.feed = 100; return true;
@@ -182,7 +184,7 @@ export class GrblSimulator extends EventEmitter {
     const cur = this.planner[0];
     const moving = cur && !this.hold && (cur.type === 'move' || cur.type === 'probe');
     const feed = moving ? Math.round(this.rateOf(cur)) : 0;
-    const spindleOn = this.st.spindle === 3 || this.st.spindle === 4;
+    const spindleOn = (this.st.spindle === 3 || this.st.spindle === 4) && !this.spindleStopOvr;
     const speed = spindleOn ? Math.round((this.st.speed * this.ov.spindle) / 100) : 0;
     const rxBytes = this.rx.reduce((n, l) => n + l.length + 1, 0);
     this.send(`<${this.machineState()}|MPos:${p3(this.mpos)}|Bf:${PLANNER_SIZE - this.planner.length},${128 - rxBytes}` +

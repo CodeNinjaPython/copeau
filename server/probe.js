@@ -47,7 +47,7 @@ function options(params) {
 async function guard(c, fn) {
   if (!c.ready) throw new Error('Machine non connectée');
   if (c.status.state !== 'Idle') throw new Error(`La machine doit être Idle (état : ${c.status.state})`);
-  if (c.job && ['running', 'paused', 'finishing'].includes(c.job.state)) throw new Error('Un job est en cours');
+  if (c.job && ['running', 'paused', 'spinup', 'finishing'].includes(c.job.state)) throw new Error('Un job est en cours');
   const distance = c.modal.distance;
   try {
     return await fn();

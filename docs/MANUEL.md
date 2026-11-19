@@ -342,6 +342,14 @@ Tous les écrans ouverts sur Copeau suivent le même usinage en direct (voir [se
 
 Si le programme contient un `M0` (pause programmée), la machine passe en **Pause** : cliquez **Reprendre** pour continuer.
 
+### Couper la broche pendant une pause
+
+- Pendant une pause (ou un `M0`), le bouton **⏻ Couper la broche** arrête la broche dès que le mouvement est complètement arrêté.
+- La case **Couper la broche en pause** (sous la barre de progression) le fait automatiquement à chaque **Pause**.
+- À la **reprise**, Copeau rallume la broche, attend sa montée en vitesse (réglage *Attente broche* de l'onglet Reprise, 3 s par défaut), puis seulement reprend le mouvement. La barre affiche le compte à rebours.
+
+Pratique pour dégager un copeau ou contrôler une passe. Ce n'est pas un arrêt d'urgence : la broche peut être relancée par la reprise.
+
 **En cas d'erreur Grbl** (ligne refusée), Copeau **met le job en pause** et affiche la ligne en cause, au lieu de continuer avec un programme incomplet. Vous pouvez alors reprendre ou arrêter.
 
 ---
