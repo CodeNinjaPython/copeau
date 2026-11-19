@@ -18,7 +18,9 @@
   <header class="topbar">
     <div class="brand"><span class="logo"></span>Copeau</div>
     <div class="connect">
+      <select id="profile" aria-label="Machine" title="Type de machine"></select>
       <select id="port" aria-label="Port"></select>
+      <input id="net-host" class="net-host" placeholder="IP de la machine" aria-label="Adresse réseau" autocomplete="off" spellcheck="false" hidden>
       <select id="baud" aria-label="Vitesse">
         <option>115200</option><option>250000</option><option>57600</option><option>9600</option>
       </select>
@@ -86,6 +88,21 @@
         </label>
       </div>
 
+      <div class="laser-panel laser-only" id="laser-panel">
+        <div class="section-title"><span>Laser <button type="button" class="ibtn" data-info="laser" aria-label="Plus d'informations" aria-expanded="false">i</button></span><span class="laser-live" id="laser-live">éteint</span></div>
+        <div class="row gap">
+          <label class="field inline grow">Repérage <input id="pointer-power" type="number" min="0.1" max="100" step="0.5" value="1"><span class="muted">%</span></label>
+          <button id="btn-pointer" class="warn grow" title="Allumer le laser à faible puissance, tête immobile">Tir de repérage</button>
+          <button type="button" class="ibtn" data-info="pointer" aria-label="Plus d'informations" aria-expanded="false">i</button>
+        </div>
+        <div class="row gap">
+          <button id="btn-frame" class="ghost grow" title="Parcourir le cadre du programme, laser éteint">⬚ Cadre du programme</button>
+          <label class="check small smoothie-only" title="Le pointeur reste allumé pendant le cadre"><input type="checkbox" id="frame-pointer"> pointeur allumé</label>
+          <button type="button" class="ibtn" data-info="frame" aria-label="Plus d'informations" aria-expanded="false">i</button>
+        </div>
+        <label class="field inline">S max <input id="laser-smax" type="number" min="0.001" step="any"><span class="muted">= 100 %</span> <button type="button" class="ibtn" data-info="smax" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
+      </div>
+
       <div class="overrides">
         <div class="section-title"><span>Corrections en direct <button type="button" class="ibtn" data-info="overrides" aria-label="Plus d'informations" aria-expanded="false">i</button></span></div>
         <div class="ov" data-ov="feed">
@@ -93,10 +110,10 @@
           <button data-rt="feedMinus10">−10</button><button data-rt="feed100">100</button><button data-rt="feedPlus10">+10</button>
         </div>
         <div class="ov" data-ov="spindle">
-          <span>Broche</span><b id="ov-spindle">100%</b>
+          <span><span class="cnc-only">Broche</span><span class="laser-only">Puissance</span></span><b id="ov-spindle">100%</b>
           <button data-rt="spindleMinus10">−10</button><button data-rt="spindle100">100</button><button data-rt="spindlePlus10">+10</button>
         </div>
-        <div class="ov" data-ov="rapid">
+        <div class="ov grbl-only" data-ov="rapid">
           <span>Rapide</span><b id="ov-rapid">100%</b>
           <button data-rt="rapid25">25</button><button data-rt="rapid50">50</button><button data-rt="rapid100">100</button>
         </div>
@@ -119,7 +136,7 @@
       <div class="drop-hint" id="drop-hint">Glissez un fichier G-code ici</div>
       <div class="goto-pop" id="goto-pop" hidden>
         <div class="goto-coords" id="goto-coords"></div>
-        <label class="check small"><input type="checkbox" id="goto-lift" checked> Monter d'abord à Z <span id="goto-safe">5</span> <button type="button" class="ibtn" data-info="gotoLift" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
+        <label class="check small cnc-only"><input type="checkbox" id="goto-lift" checked> Monter d'abord à Z <span id="goto-safe">5</span> <button type="button" class="ibtn" data-info="gotoLift" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
         <div class="row gap">
           <button id="goto-go" class="primary grow">Aller ici</button>
           <button id="goto-cancel" class="ghost" title="Annuler (Échap)">✕</button>
@@ -146,8 +163,8 @@
           <option value="1">1×</option><option value="2">2×</option><option value="5" selected>5×</option>
           <option value="10">10×</option><option value="25">25×</option><option value="100">100×</option>
         </select>
-        <label class="pb-opt" title="Diamètre de la fraise simulée">Ø <input id="pb-tool" type="number" min="0.1" step="0.1" value="6"></label>
-        <label class="check pb-opt"><input type="checkbox" id="pb-stock" checked> Matière</label>
+        <label class="pb-opt cnc-only" title="Diamètre de la fraise simulée">Ø <input id="pb-tool" type="number" min="0.1" step="0.1" value="6"></label>
+        <label class="check pb-opt cnc-only"><input type="checkbox" id="pb-stock" checked> Matière</label>
         <button type="button" class="ibtn" data-info="sim" aria-label="Plus d'informations" aria-expanded="false">i</button>
         <button id="pb-close" class="ghost pb-btn" title="Quitter la simulation">✕</button>
       </div>
@@ -155,13 +172,14 @@
         <div class="job-name"><span id="job-name">Aucun programme</span><span class="muted small" id="job-meta"></span></div>
         <div class="progress"><div id="job-progress"></div></div>
         <div class="job-times muted small"><span id="job-elapsed"></span><span id="job-remaining"></span>
-          <label class="check small pause-opt"><input type="checkbox" id="opt-pause-spindle"> Couper la broche en pause <button type="button" class="ibtn" data-info="pauseSpindle" aria-label="Plus d'informations" aria-expanded="false">i</button></label></div>
+          <label class="check small pause-opt cnc-only"><input type="checkbox" id="opt-pause-spindle"> Couper la broche en pause <button type="button" class="ibtn" data-info="pauseSpindle" aria-label="Plus d'informations" aria-expanded="false">i</button></label></div>
         <div class="job-actions">
           <button type="button" class="ibtn" data-info="job" aria-label="Plus d'informations" aria-expanded="false">i</button>
           <label class="ghost file-btn">Ouvrir<input id="file-input" type="file" accept=".nc,.gcode,.ngc,.tap,.gc,.cnc,.txt" hidden></label>
+          <label class="ghost file-btn laser-only" title="Graver une photo ou un logo (PNG, JPG…)">Image…<input id="image-input" type="file" accept="image/*" hidden></label>
           <button id="btn-run" class="primary">Démarrer</button>
           <button id="btn-pause" class="warn">Pause</button>
-          <button id="btn-spindle" class="ghost" hidden title="Arrêter la broche pendant la pause">⏻ Couper la broche</button>
+          <button id="btn-spindle" class="ghost cnc-only" hidden title="Arrêter la broche pendant la pause">⏻ Couper la broche</button>
           <button id="btn-stop" class="danger">Arrêter</button>
         </div>
       </div>
@@ -172,7 +190,7 @@
       <nav class="tabs" role="tablist">
         <button data-tab="console" class="active">Console</button>
         <button data-tab="resume">Reprise</button>
-        <button data-tab="probe">Palpage</button>
+        <button data-tab="probe" class="cnc-only">Palpage</button>
         <button data-tab="zones">Zone</button>
         <button data-tab="macros">Macros</button>
         <button data-tab="settings">Réglages</button>
@@ -185,25 +203,29 @@
           <button class="primary">Envoyer</button>
         </form>
         <div class="row gap wrap quick">
-          <button data-cmd="$$" class="ghost small">$$</button>
+          <button data-cmd="$$" class="ghost small grbl-only">$$</button>
           <button data-cmd="$G" class="ghost small">$G</button>
           <button data-cmd="$#" class="ghost small">$#</button>
-          <button data-cmd="$I" class="ghost small">$I</button>
-          <button data-cmd="M3 S10000" class="ghost small">M3 S10000</button>
-          <button data-cmd="M5" class="ghost small">M5</button>
+          <button data-cmd="$I" class="ghost small grbl-only">$I</button>
+          <button data-cmd="version" class="ghost small smoothie-only">version</button>
+          <button data-cmd="M115" class="ghost small smoothie-only">M115</button>
+          <button data-cmd="M3 S10000" class="ghost small cnc-only">M3 S10000</button>
+          <button data-cmd="M5" class="ghost small grbl-only">M5</button>
+          <button data-cmd="fire off" class="ghost small smoothie-only" title="Éteindre un tir laser manuel">fire off</button>
           <button id="btn-clear-console" class="ghost small">Effacer</button>
           <button type="button" class="ibtn" data-info="console" aria-label="Plus d'informations" aria-expanded="false">i</button>
         </div>
       </div>
 
       <div class="tab" data-pane="resume" hidden>
-        <p class="muted">Reprendre un usinage interrompu à partir d'une ligne. Copeau restaure les modes, démarre la broche, remonte au Z de sécurité, se place au-dessus du point puis plonge doucement.</p>
+        <p class="muted cnc-only">Reprendre un usinage interrompu à partir d'une ligne. Copeau restaure les modes, démarre la broche, remonte au Z de sécurité, se place au-dessus du point puis plonge doucement.</p>
+        <p class="muted laser-only">Reprendre une gravure interrompue à partir d'une ligne. Copeau restaure les modes, rejoint le point laser éteint, puis rallume le laser à la puissance du programme.</p>
         <label class="field"><span>Ligne de reprise <button type="button" class="ibtn" data-info="resume" aria-label="Plus d'informations" aria-expanded="false">i</button></span>
           <input id="resume-line" type="number" min="1" value="1">
         </label>
         <input id="resume-slider" type="range" min="1" value="1">
         <pre id="resume-context" class="code-context"></pre>
-        <label class="field inline">Attente broche <input id="resume-spinup" type="number" min="0" value="3"><span class="muted">s</span> <button type="button" class="ibtn" data-info="spinup" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
+        <label class="field inline cnc-only">Attente broche <input id="resume-spinup" type="number" min="0" value="3"><span class="muted">s</span> <button type="button" class="ibtn" data-info="spinup" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
         <pre id="resume-preamble" class="code-context muted"></pre>
         <button id="btn-resume-run" class="primary block">Reprendre à cette ligne</button>
       </div>
@@ -296,6 +318,39 @@
         <button id="btn-tool-probe" class="ghost grow">Palper Z</button>
         <button id="btn-tool-continue" class="primary grow">Continuer</button>
         <button id="btn-tool-stop" class="danger">Arrêter</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="raster" class="modal" hidden>
+    <div class="modal-card raster-card">
+      <h2>Graver une image <button type="button" class="ibtn" data-info="image" aria-label="Plus d'informations" aria-expanded="false">i</button></h2>
+      <div class="raster-body">
+        <div class="raster-preview"><canvas id="raster-canvas" width="10" height="10"></canvas><p class="muted small">Aperçu : noir = laser à pleine puissance demandée.</p></div>
+        <div class="raster-form" id="raster-form">
+          <div class="seg" id="raster-mode">
+            <button data-rmode="gray">Niveaux de gris</button><button data-rmode="threshold">Noir et blanc</button><button data-rmode="dither">Tramage</button>
+          </div>
+          <div class="grid2">
+            <label class="field"><span>Largeur (mm)</span><input type="number" min="1" step="any" data-r="width"></label>
+            <label class="field"><span>Hauteur (mm)</span><input type="number" min="1" step="any" data-r="height"></label>
+            <label class="field"><span>Résolution (lignes/mm) <button type="button" class="ibtn" data-info="rResolution" aria-label="Plus d'informations" aria-expanded="false">i</button></span><input type="number" min="1" max="25" step="any" data-r="resolution"></label>
+            <label class="field"><span>Vitesse (mm/min)</span><input type="number" min="10" step="100" data-r="speed"></label>
+            <label class="field"><span>Puissance min (%) <button type="button" class="ibtn" data-info="rPower" aria-label="Plus d'informations" aria-expanded="false">i</button></span><input type="number" min="0" max="100" step="1" data-r="powerMin"></label>
+            <label class="field"><span>Puissance max (%)</span><input type="number" min="0" max="100" step="1" data-r="powerMax"></label>
+            <label class="field" data-only="threshold"><span>Seuil (0-255)</span><input type="number" min="1" max="254" step="1" data-r="threshold"></label>
+            <label class="field"><span>Marge d'accélération (mm) <button type="button" class="ibtn" data-info="rOverscan" aria-label="Plus d'informations" aria-expanded="false">i</button></span><input type="number" min="0" step="any" data-r="overscan"></label>
+          </div>
+          <label class="field inline">Origine X0 Y0
+            <select data-r="origin"><option value="bottom-left">coin bas gauche de l'image</option><option value="center">centre de l'image</option></select>
+          </label>
+          <label class="check small"><input type="checkbox" data-r="invert"> Inverser (graver les zones claires)</label>
+          <div class="raster-info small" id="raster-info"></div>
+        </div>
+      </div>
+      <div class="row gap">
+        <button id="raster-cancel" class="ghost">Annuler</button>
+        <button id="raster-go" class="primary grow">Générer et charger</button>
       </div>
     </div>
   </div>

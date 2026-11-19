@@ -2,7 +2,9 @@ import { Viewer, outline } from './viewer.js';
 import { startTour } from './tour.js';
 import { Preview } from './preview.js';
 import { ibtn, initInfo } from './info.js';
-import { splitProgram, analyze, buildResume } from './shared/gcode.js';
+import { splitProgram, analyze, buildResume, fmt } from './shared/gcode.js';
+import { PROFILES, profileOf, laserSMax } from './shared/profiles.js';
+import { rasterGcode, powerMap, RASTER_DEFAULTS } from './shared/raster.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -19,7 +21,21 @@ const S = {
   settings: {},
   macros: [],
   zones: { table: null, zone: null },
+  config: { machine: {} },
 };
+
+// ---- Profil de machine (CNC, laser Grbl, Emblaser 2…) ------------------------
+// Machine connectée : son profil. Sinon : celui choisi dans la barre du haut,
+// partagé entre les écrans (config serveur).
+const prof = () => profileOf((S.machine.connected && S.machine.profile) || S.config.machine?.profile);
+const isLaser = () => !!prof().laser;
+const isSmoothie = () => prof().firmware === 'smoothie';
+// Valeur S pour 100 % : réglée à la main, sinon celle du profil ou de $30.
+const sMax = () => (S.config.machine?.sMax > 0 ? S.config.machine.sMax : laserSMax(prof(), S.settings));
+const laserOpts = () => (isLaser() ? { firmware: prof().firmware, sMax: sMax() } : null);
+// Laser : pas de montée au Z de survol (le Z sert à la mise au point).
+const liftZ = () => (isLaser() ? null : safeZ());
+const unlockCmd = () => (isSmoothie() ? 'M999' : '$X');
 
 // ---- WebSocket ------------------------------------------------------------
 
@@ -62,14 +78,20 @@ function onMessage(m) {
       m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
       return;
     }
-    case 'state': S.machine = m.s; return renderMachine();
+    case 'state': S.machine = m.s; applyProfile(); return renderMachine();
     case 'job': S.job = m.j; return renderJob();
     case 'job-text': return onJobText(m.name, m.text);
-    case 'settings': S.settings = m.s; return renderSettings();
+    case 'settings': S.settings = m.s; applyProfile(); return renderSettings();
     case 'logs': $('#console').innerHTML = ''; m.list.forEach(addLog); return;
     case 'log': return addLog(m.entry);
     case 'macros': S.macros = m.list; return renderMacros();
-    case 'config': S.zones = { table: null, zone: null, ...(m.config.zones || {}) }; resetDrafts(); return renderZones();
+    case 'config':
+      S.config = { ...m.config, machine: m.config.machine || {} };
+      S.zones = { table: null, zone: null, ...(m.config.zones || {}) };
+      if (!$('#net-host').value && S.config.machine.host) $('#net-host').value = S.config.machine.host;
+      resetDrafts();
+      applyProfile();
+      return renderZones();
   }
 }
 
@@ -103,17 +125,59 @@ async function refreshPorts() {
   const prev = sel.value || store.get('port', 'simulateur');
   sel.innerHTML = list.map((p) => `<option value="${p.path}">${escapeHtml(p.label)}</option>`).join('');
   if (list.some((p) => p.path === prev)) sel.value = prev;
+  updateConnectFields();
+}
+
+// Réseau : champ d'adresse. Smoothieware (USB natif) ignore la vitesse.
+function updateConnectFields() {
+  const net = $('#port').value === 'reseau';
+  $('#net-host').hidden = !net;
+  $('#baud').hidden = net || isSmoothie();
+}
+$('#port').addEventListener('change', updateConnectFields);
+$('#profile').innerHTML = Object.values(PROFILES).map((p) => `<option value="${p.id}">${escapeHtml(p.label)}</option>`).join('');
+$('#profile').onchange = () => {
+  const profile = $('#profile').value;
+  S.config.machine = { ...S.config.machine, profile };
+  applyProfile();
+  act('setConfig', { key: 'machine', value: S.config.machine }).catch(() => {});
+};
+
+// Applique le profil : ce qui s'affiche, couleurs du parcours, libellés.
+let appliedProfile = null;
+function applyProfile() {
+  const p = prof();
+  document.body.classList.toggle('laser', !!p.laser);
+  document.body.classList.toggle('smoothie', p.firmware === 'smoothie');
+  if ($('#profile').value !== p.id) $('#profile').value = p.id;
+  $('#btn-unlock').title = `Déverrouiller (${unlockCmd()})`;
+  $('#btn-reset').title = p.firmware === 'smoothie' ? 'Arrêt immédiat de la carte (Ctrl-X, HALT)' : 'Reset logiciel (Ctrl-X)';
+  if (document.activeElement !== $('#laser-smax')) $('#laser-smax').value = fmt(sMax());
+  updateConnectFields();
+  const key = `${p.id}|${sMax()}`;
+  if (key === appliedProfile) return;
+  appliedProfile = key;
+  if (p.laser && activeTab === 'probe') showTab('console');
+  if (S.lines.length) {
+    viewer.load(S.lines, { laser: laserOpts() });
+    if (S.job && S.job.state !== 'loaded') viewer.setProgress(S.job.acked);
+  }
+  renderSettings();
+  renderZones();
 }
 
 $('#btn-refresh').onclick = refreshPorts;
 $('#baud').value = store.get('baud', '115200');
 $('#btn-connect').onclick = async () => {
   if (S.machine.connected) return act('disconnect').catch(() => {});
-  store.set('port', $('#port').value);
+  const port = $('#port').value;
+  const host = $('#net-host').value.trim();
+  if (port === 'reseau' && !host) { $('#net-host').focus(); return toast('Indiquez l\'adresse IP de la machine (ex. 192.168.1.50)', 'err'); }
+  store.set('port', port);
   store.set('baud', $('#baud').value);
-  await act('connect', { port: $('#port').value, baud: $('#baud').value }).catch(() => {});
+  await act('connect', { port, baud: $('#baud').value, profile: $('#profile').value, host }).catch(() => {});
 };
-$('#btn-unlock').onclick = () => cmd('$X');
+$('#btn-unlock').onclick = () => cmd(unlockCmd());
 $('#btn-home').onclick = () => cmd('$H');
 $('#btn-reset').onclick = () => rt('reset');
 
@@ -198,6 +262,9 @@ function renderMachine() {
   $('#btn-connect').className = m.connected ? 'ghost' : 'primary';
   $('#port').disabled = m.connected;
   $('#baud').disabled = m.connected;
+  $('#profile').disabled = m.connected;
+  $('#profile').title = m.connected ? 'Déconnectez pour changer de type de machine' : 'Type de machine';
+  $('#net-host').disabled = m.connected;
 
   if (!m.connected) setBadge('Déconnecté');
   else if (!m.ready) setBadge('Connexion…');
@@ -213,13 +280,17 @@ function renderMachine() {
   $('#ov-spindle').textContent = `${s.ov?.spindle ?? 100}%`;
   $('#ov-rapid').textContent = `${s.ov?.rapid ?? 100}%`;
   $('#live-feed').textContent = `F ${s.feed ?? 0}`;
-  $('#live-speed').textContent = `S ${s.speed ?? 0}`;
+  const power = laserPower();
+  $('#live-speed').textContent = isLaser() ? `Laser ${fmtNum(power)} %` : `S ${s.speed ?? 0}`;
+  const live = $('#laser-live');
+  live.textContent = m.pointer ? `repérage ${fmt(m.pointer.power)} %` : power > 0 ? `${fmtNum(power)} %` : 'éteint';
+  live.classList.toggle('on', !!m.pointer || power > 0);
   $('#live-modal').textContent = m.modal ? [m.modal.distance, m.modal.spindle, m.modal.coolant].filter(Boolean).join(' ') : '';
 
   const alarm = m.ready && state === 'Alarm';
   const bar = $('#alarm-bar');
   bar.hidden = !alarm;
-  if (alarm) bar.textContent = `${bar.dataset.text || 'Machine en alarme'}. Faites l'origine ($H) ou déverrouillez ($X) si la position est sûre.`;
+  if (alarm) bar.textContent = `${bar.dataset.text || 'Machine en alarme'}. Faites l'origine ($H) ou déverrouillez (${unlockCmd()}) si la position est sûre.`;
 
   viewer.setWorkOffset(s.wco);
   viewer.setTool(s.wpos);
@@ -227,6 +298,14 @@ function renderMachine() {
   const wcoKey = `${s.wco?.X},${s.wco?.Y},${s.wco?.Z}`;
   if (wcoKey !== lastWcoKey) { lastWcoKey = wcoKey; renderZones(); }
   updateEnabled();
+}
+
+// Puissance laser actuelle en % : Smoothieware la donne (L:), Grbl donne S.
+function laserPower() {
+  const s = S.machine.status;
+  if (!isLaser() || !S.machine.ready) return 0;
+  if (isSmoothie()) return s.laserPower || 0;
+  return ['Run', 'Jog'].includes(s.state) ? Math.min(100, ((s.speed || 0) / sMax()) * 100) : 0;
 }
 
 function updateEnabled() {
@@ -246,8 +325,13 @@ function updateEnabled() {
   $$('[data-rt]').forEach((b) => (b.disabled = !m.ready));
 
   const j = S.job;
-  const canRun = idle && j && !jobActive && S.lines.length;
+  const canRun = idle && j && !jobActive && S.lines.length && !m.pointer;
   $('#btn-run').disabled = !canRun;
+  const pointer = $('#btn-pointer');
+  pointer.disabled = !(m.ready && ((idle && !jobActive) || m.pointer));
+  pointer.classList.toggle('active', !!m.pointer);
+  pointer.textContent = m.pointer ? '■ Éteindre le laser' : 'Tir de repérage';
+  $('#btn-frame').disabled = !(S.info && Number.isFinite(S.info.min.X)) || !canJog;
   $('#btn-resume-run').disabled = !canRun;
   const machineHeld = state === 'Hold' || state === 'Door'; // M0 ou porte de sécurité
   const pauseBtn = $('#btn-pause');
@@ -285,7 +369,7 @@ document.addEventListener('click', (e) => {
 });
 // → X0 Y0 : au-dessus de l'origine, après montée au Z de survol si besoin.
 $('#btn-goto-zero').onclick = () => {
-  act('jogTo', { X: 0, Y: 0, liftZ: safeZ(), feed: Number($('#jog-feed').value) }).catch(() => {});
+  act('jogTo', { X: 0, Y: 0, liftZ: liftZ(), feed: Number($('#jog-feed').value) }).catch(() => {});
 };
 // ⌂ Origine : retour complet au zéro établi (X0 Y0 puis Z0, descente lente).
 // ⌂ d'un axe : seul cet axe revient à 0 (Z descend lentement, X/Y à la hauteur actuelle).
@@ -303,7 +387,7 @@ $('#btn-goto-origin').onclick = () => {
   const w = S.machine.status.wco || {};
   if (!w.X && !w.Y && !w.Z && !confirm('Aucun zéro ne semble défini : l\'origine est celle de la machine (0, 0, 0).\n\nY aller quand même ?')) return;
   toast('Retour à l\'origine… Échap pour arrêter');
-  act('gotoOrigin', { liftZ: safeZ(), feed: Number($('#jog-feed').value), plungeFeed: 300 }).catch(() => {});
+  act('gotoOrigin', { liftZ: liftZ(), feed: Number($('#jog-feed').value), plungeFeed: 300 }).catch(() => {});
 };
 
 let jogStep = store.get('jogStep', 1);
@@ -345,13 +429,14 @@ function makeJogger() {
     holdTimer = repeatTimer = null;
   };
   // Arrêt immédiat. Les zéros restent grisés jusqu'à l'arrêt complet, pour
-  // être posés à la position finale.
+  // être posés à la position finale. Smoothieware ne sait pas annuler un
+  // mouvement en douceur : il finit le pas en cours (gentle).
   async function stopNow() {
     stopping = true;
     jogSettling++;
     updateEnabled();
     try {
-      await request('jogStop');
+      await request('jogStop', { gentle: true });
       await waitUntil(() => S.machine.status.state === 'Idle', 5000);
     } catch (e) {
       toastOnce(e.message);
@@ -372,7 +457,9 @@ function makeJogger() {
         // Durée d'un pas à la vitesse jog (diagonale comprise).
         const dist = step * Math.hypot(...Object.values(dir));
         const ms = Math.max(40, (dist / feed()) * 60000);
-        stepOnce(); // un pas d'avance pour un mouvement fluide
+        // Un pas d'avance pour un mouvement fluide. Pas avec Smoothieware : au
+        // relâchement il finit les pas reçus, un pas d'avance dépasserait.
+        if (!isSmoothie()) stepOnce();
         repeatTimer = setInterval(stepOnce, ms);
       }, 300);
     },
@@ -466,7 +553,7 @@ function onJobText(name, text) {
   S.lines = splitProgram(text);
   const rapid = Number(S.settings[110]) || 3000;
   S.info = analyze(S.lines, { rapidRate: rapid });
-  viewer.load(S.lines);
+  viewer.load(S.lines, { laser: laserOpts() });
   const i = S.info;
   const dims = Number.isFinite(i.min.X)
     ? `${fmtNum(i.max.X - i.min.X)} × ${fmtNum(i.max.Y - i.min.Y)} × ${fmtNum(i.max.Z - i.min.Z)} mm`
@@ -474,7 +561,7 @@ function onJobText(name, text) {
   $('#job-name').textContent = name;
   $('#job-meta').textContent = [`${i.lines} lignes`, `≈ ${fmtDuration(i.seconds)}`, dims,
     i.toolChanges ? `${i.toolChanges} changement(s) d'outil` : ''].filter(Boolean).join(' · ');
-  if (Number.isFinite(i.min.Z) && i.min.Z >= 0) toast('Attention : aucune passe sous Z0. Le zéro Z est-il au bon endroit ?', 'err');
+  if (!isLaser() && Number.isFinite(i.min.Z) && i.min.Z >= 0) toast('Attention : aucune passe sous Z0. Le zéro Z est-il au bon endroit ?', 'err');
   closePreview();
   setupResume();
   renderZones();
@@ -550,9 +637,16 @@ setInterval(renderTimes, 1000);
 $('#btn-run').onclick = () => {
   const fit = fitCheck();
   if (fit && !fit.ok && !confirm(`${fit.text}\n\nDémarrer quand même ?`)) return;
-  if (S.info && Number.isFinite(S.info.min.Z) && S.info.min.Z < 0 && !confirm('Démarrer l\'usinage ? Vérifiez l\'origine, le serrage et la broche.')) return;
+  if (isLaser()) {
+    if (!confirm(`Démarrer la gravure ?\n\nCouvercle fermé, lunettes adaptées à la longueur d'onde, aspiration en marche : ne laissez jamais un laser travailler sans surveillance.${laserModeWarning()}`)) return;
+  } else if (S.info && Number.isFinite(S.info.min.Z) && S.info.min.Z < 0 && !confirm('Démarrer l\'usinage ? Vérifiez l\'origine, le serrage et la broche.')) return;
   act('run', { from: 0 }).catch(() => {});
 };
+// Grbl en mode laser ($32=1) éteint le laser pendant les G0 et les pauses.
+function laserModeWarning() {
+  if (prof().firmware !== 'grbl' || S.settings[32] === undefined || S.settings[32] === '1') return '';
+  return '\n\n⚠ Mode laser désactivé dans la carte ($32=0) : le laser restera allumé pendant les déplacements rapides. Envoyez $32=1.';
+}
 $('#opt-pause-spindle').checked = store.get('pauseSpindle', false);
 $('#opt-pause-spindle').onchange = (e) => store.set('pauseSpindle', e.target.checked);
 const spinUpSeconds = () => { const v = Number($('#resume-spinup').value); return Number.isFinite(v) && v >= 0 ? v : 3; };
@@ -560,9 +654,9 @@ $('#btn-pause').onclick = () => {
   const j = S.job;
   // Reprise après une pause ou un M0 : le serveur rallume la broche si besoin.
   if (j?.state === 'paused' || (j?.state === 'running' && ['Hold', 'Door'].includes(S.machine.status.state))) {
-    act('resume', { spinUp: spinUpSeconds() }).catch(() => {});
+    act('resume', { spinUp: isLaser() ? 0 : spinUpSeconds() }).catch(() => {});
   } else {
-    act('pause', { stopSpindle: $('#opt-pause-spindle').checked }).catch(() => {});
+    act('pause', { stopSpindle: !isLaser() && $('#opt-pause-spindle').checked }).catch(() => {});
   }
 };
 $('#btn-spindle').onclick = () => act('spindleStop').then(() => toast('Broche coupée : elle se rallumera à la reprise', 'ok')).catch(() => {});
@@ -599,7 +693,9 @@ function setResumeLine(n) {
     ctx.push(k === i ? `<span class="cur">${t}</span>` : t);
   }
   $('#resume-context').innerHTML = ctx.join('\n') || 'Aucun programme chargé';
-  const pre = S.lines.length && i > 0 ? buildResume(S.lines, i, { spinUpSeconds: spinUpSeconds(), minSafeZ: safeZ() }).lines : [];
+  const pre = S.lines.length && i > 0
+    ? buildResume(S.lines, i, { spinUpSeconds: spinUpSeconds(), minSafeZ: safeZ(), laser: isLaser(), firmware: prof().firmware }).lines
+    : [];
   $('#resume-preamble').textContent = pre.length ? `Préambule envoyé avant la ligne ${n} :\n${pre.join('\n')}` : 'Départ au début : pas de préambule.';
   if (activeTab === 'resume') viewer.setMarker(i);
 }
@@ -643,7 +739,7 @@ function closeGoto() {
 $('#goto-cancel').onclick = closeGoto;
 $('#goto-go').onclick = () => {
   if (!gotoPoint) return;
-  act('jogTo', { ...gotoPoint, liftZ: $('#goto-lift').checked ? safeZ() : null, feed: Number($('#jog-feed').value) })
+  act('jogTo', { ...gotoPoint, liftZ: $('#goto-lift').checked ? liftZ() : null, feed: Number($('#jog-feed').value) })
     .catch(() => {});
   $('#goto-pop').hidden = true;
   setTimeout(() => viewer.setTarget(null), 600);
@@ -651,7 +747,10 @@ $('#goto-go').onclick = () => {
 
 $('#btn-resume-run').onclick = () => {
   const n = Number($('#resume-line').value);
-  if (!confirm(`Reprendre à la ligne ${n} ?\n${S.lines[n - 1]}\n\nL'outil va monter au Z de sécurité puis se placer au-dessus du point de reprise.`)) return;
+  const how = isLaser()
+    ? 'La tête va rejoindre le point de reprise laser éteint, puis le laser se rallumera.'
+    : 'L\'outil va monter au Z de sécurité puis se placer au-dessus du point de reprise.';
+  if (!confirm(`Reprendre à la ligne ${n} ?\n${S.lines[n - 1]}\n\n${how}`)) return;
   act('run', { from: n - 1, spinUp: spinUpSeconds(), safeZ: safeZ() }).catch(() => {});
 };
 
@@ -978,7 +1077,10 @@ function renderTableDims(card, saved) {
   const box = card.querySelector('[data-dims]');
   if (box.contains(document.activeElement)) return;
   const set = S.settings;
-  const val = (fromShape, key) => (fromShape !== undefined ? r3(fromShape) : set[key] ? r3(Number(set[key])) : '');
+  // Sans réglage lu dans la carte, on propose la surface annoncée du profil (Emblaser 2 : 500 × 300 × 50).
+  const area = prof().area;
+  const fromArea = (key) => (area ? area[{ 130: 'X', 131: 'Y', 132: 'Z' }[key]] ?? '' : '');
+  const val = (fromShape, key) => (fromShape !== undefined ? r3(fromShape) : set[key] ? r3(Number(set[key])) : fromArea(key));
   const w = val(saved && Math.abs(saved.b.X - saved.a.X), 130);
   const h = val(saved && Math.abs(saved.b.Y - saved.a.Y), 131);
   const z = val(saved ? saved.z || undefined : undefined, 132);
@@ -992,8 +1094,8 @@ function renderTableDims(card, saved) {
         <option value="coin1"${anchor === 'coin1' ? ' selected' : ''}>Coin 1 fixe</option>
         <option value="tool"${anchor === 'tool' ? ' selected' : ''}>Outil = coin avant gauche</option>
       </select></div>
-    <label class="check small"><input type="checkbox" data-write-grbl ${S.machine.ready ? 'checked' : 'disabled'}> Écrire aussi dans la carte ($130 / $131 / $132) ${ibtn('writeGrbl')}</label>
-    <div class="row gap"><button class="primary small grow" data-dims-apply>Appliquer</button><button class="ghost small" data-from-grbl title="Lire la course enregistrée dans la carte">Lire la carte</button></div>`;
+    <label class="check small grbl-only"><input type="checkbox" data-write-grbl ${S.machine.ready ? 'checked' : 'disabled'}> Écrire aussi dans la carte ($130 / $131 / $132) ${ibtn('writeGrbl')}</label>
+    <div class="row gap"><button class="primary small grow" data-dims-apply>Appliquer</button><button class="ghost small grbl-only" data-from-grbl title="Lire la course enregistrée dans la carte">Lire la carte</button></div>`;
 }
 
 async function applyTableDims(card) {
@@ -1022,7 +1124,7 @@ async function applyTableDims(card) {
     a = cur.a;
     b = { X: r3(a.X + sx * W), Y: r3(a.Y + sy * D) };
   }
-  const write = card.querySelector('[data-write-grbl]')?.checked;
+  const write = !isSmoothie() && card.querySelector('[data-write-grbl]')?.checked;
   if (write) {
     const st = S.machine.status.state;
     if (!S.machine.ready || !['Idle', 'Alarm'].includes(st)) return toast('La carte accepte les réglages seulement à l\'arrêt (Prêt ou Alarme)', 'err');
@@ -1183,22 +1285,188 @@ for (const card of $$('.zone-card[data-target]')) {
   });
 }
 
-function runPath(points) {
+// pointer : % du tir de repérage à garder allumé pendant le parcours.
+function runPath(points, pointer = 0) {
   if ($('#jog-stop').disabled) return toastOnce(jogBlockedReason());
-  act('jogPath', { points, liftZ: safeZ(), feed: Number($('#jog-feed').value) }).catch(() => {});
+  act('jogPath', { points, liftZ: liftZ(), feed: Number($('#jog-feed').value), pointer }).catch(() => {});
 }
-$('#btn-outline-job').onclick = () => {
+// Cadre du programme. Laser : à la hauteur actuelle, laser éteint (ou
+// pointeur allumé avec Smoothieware) pour voir où tombera la gravure.
+function outlineJob(pointer = 0) {
   const i = S.info;
   if (!i || !Number.isFinite(i.min.X)) return;
   runPath([
     { X: i.min.X, Y: i.min.Y }, { X: i.max.X, Y: i.min.Y }, { X: i.max.X, Y: i.max.Y },
     { X: i.min.X, Y: i.max.Y }, { X: i.min.X, Y: i.min.Y },
-  ]);
-};
+  ], pointer);
+}
+$('#btn-outline-job').onclick = () => outlineJob();
+$('#btn-frame').onclick = () => outlineJob(isSmoothie() && $('#frame-pointer').checked ? Number($('#pointer-power').value) || 1 : 0);
 $('#zone-safe-z').value = store.get('safeZ', 5);
 $('#zone-safe-z').onchange = () => store.set('safeZ', safeZ());
 
 
+
+// ---- Laser : tir de repérage, S max -------------------------------------------
+
+$('#pointer-power').value = store.get('pointerPower', 1);
+$('#pointer-power').onchange = () => store.set('pointerPower', Number($('#pointer-power').value) || 1);
+$('#frame-pointer').checked = store.get('framePointer', false);
+$('#frame-pointer').onchange = (e) => store.set('framePointer', e.target.checked);
+$('#btn-pointer').onclick = () => {
+  if (S.machine.pointer) return act('laserPointer', { on: false }).catch(() => {});
+  const p = Number($('#pointer-power').value) || 1;
+  if (p > 5 && !confirm(`Tir de repérage à ${fmt(p)} % : à cette puissance le laser marque ou brûle la matière, et le faisceau est dangereux pour les yeux.\n\nAllumer quand même ?`)) return;
+  act('laserPointer', { on: true, power: p })
+    .then(() => toast('Laser allumé à faible puissance : il s\'éteint tout seul après 60 s', 'info'))
+    .catch(() => {});
+};
+$('#laser-smax').onchange = (e) => {
+  const v = Number(e.target.value);
+  if (!(v > 0)) { e.target.value = fmt(sMax()); return toast('S max doit être positif', 'err'); }
+  S.config.machine = { ...S.config.machine, sMax: v };
+  act('setConfig', { key: 'machine', value: S.config.machine }).then(() => toast(`100 % de puissance = S${fmt(v)}`, 'ok')).catch(() => {});
+  e.target.blur();
+};
+
+// ---- Laser : gravure d'une image ------------------------------------------------
+// L'image est redimensionnée dans le navigateur (un pixel = un pas de gravure),
+// convertie en puissances puis en G-code ligne à ligne, chargé comme un
+// programme ordinaire.
+
+const raster = { img: null, url: null, name: '', aspect: 1, opts: { ...RASTER_DEFAULTS, width: 50, height: 50, ...store.get('raster', {}) } };
+const RASTER_MAX_POINTS = 16e6;
+
+async function openRaster(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  try {
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = () => reject(new Error('Image illisible')); img.src = url; });
+  } catch (e) { URL.revokeObjectURL(url); return toast(e.message, 'err'); }
+  closeRaster();
+  Object.assign(raster, { img, url, name: file.name.replace(/\.[^.]+$/, ''), aspect: img.naturalHeight / img.naturalWidth });
+  raster.opts.height = r3(raster.opts.width * raster.aspect);
+  fillRasterForm();
+  $('#raster').hidden = false;
+  drawRaster();
+}
+function closeRaster() {
+  $('#raster').hidden = true;
+  if (raster.url) URL.revokeObjectURL(raster.url);
+  raster.img = raster.url = null;
+}
+function fillRasterForm() {
+  const o = raster.opts;
+  for (const el of $$('[data-r]')) {
+    if (el.type === 'checkbox') el.checked = !!o[el.dataset.r];
+    else if (document.activeElement !== el) el.value = o[el.dataset.r];
+  }
+  $$('#raster-mode button').forEach((b) => b.classList.toggle('active', b.dataset.rmode === o.mode));
+  $('[data-only="threshold"]').hidden = o.mode !== 'threshold';
+}
+// Pixels en niveaux de gris, à la résolution de gravure (scale < 1 : aperçu allégé).
+function rasterPixels(scale = 1) {
+  const o = raster.opts;
+  const width = Math.max(1, Math.round(o.width * o.resolution * scale));
+  const height = Math.max(1, Math.round(o.height * o.resolution * scale));
+  if (width * height > RASTER_MAX_POINTS) throw new Error(`Image trop grande à graver (${width} × ${height} points) : réduisez la taille ou la résolution.`);
+  const c = document.createElement('canvas');
+  c.width = width;
+  c.height = height;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff'; // les zones transparentes ne se gravent pas
+  ctx.fillRect(0, 0, width, height);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(raster.img, 0, 0, width, height);
+  const d = ctx.getImageData(0, 0, width, height).data;
+  const gray = new Uint8Array(width * height);
+  for (let i = 0; i < gray.length; i++) gray[i] = Math.round(0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]);
+  return { gray, width, height };
+}
+let rasterTimer = null;
+function drawRaster() {
+  clearTimeout(rasterTimer);
+  rasterTimer = setTimeout(() => {
+    if (!raster.img) return;
+    const o = raster.opts;
+    const info = $('#raster-info');
+    const full = Math.round(o.width * o.resolution) * Math.round(o.height * o.resolution);
+    if (full > RASTER_MAX_POINTS) { info.innerHTML = '<span class="bad">Image trop grande à graver : réduisez la taille ou la résolution.</span>'; return; }
+    const scale = Math.min(1, Math.sqrt(1.5e6 / Math.max(1, full))); // aperçu : 1,5 million de points au plus
+    let px;
+    try { px = rasterPixels(scale); } catch (e) { info.innerHTML = `<span class="bad">${escapeHtml(e.message)}</span>`; return; }
+    const pow = powerMap(px.gray, px.width, px.height, o);
+    const hi = Math.max(0.01, o.powerMax / 100);
+    const canvas = $('#raster-canvas');
+    canvas.width = px.width;
+    canvas.height = px.height;
+    const ctx = canvas.getContext('2d');
+    const out = ctx.createImageData(px.width, px.height);
+    let burnRows = 0, burnLen = 0;
+    for (let y = 0; y < px.height; y++) {
+      let first = -1, last = -1;
+      for (let x = 0; x < px.width; x++) {
+        const i = y * px.width + x;
+        const v = Math.round(255 * (1 - Math.min(1, pow[i] / hi)));
+        out.data[i * 4] = out.data[i * 4 + 1] = out.data[i * 4 + 2] = v;
+        out.data[i * 4 + 3] = 255;
+        if (pow[i] > 0) { if (first < 0) first = x; last = x; }
+      }
+      if (first >= 0) { burnRows++; burnLen += (last - first + 1) / (o.resolution * scale) + 2 * o.overscan; }
+    }
+    ctx.putImageData(out, 0, 0);
+    // Durée : lignes gravées (ramenées à la vraie résolution) à la vitesse de gravure.
+    const seconds = ((burnLen / Math.max(1, o.speed)) * 60) / scale;
+    const hint = o.powerMax > 80 ? '<br><span class="bad">Puissance max élevée : faites d\'abord un essai sur une chute.</span>' : '';
+    info.innerHTML = `${fmtNum(o.width)} × ${fmtNum(o.height)} mm · ${Math.round(o.width * o.resolution)} × ${Math.round(o.height * o.resolution)} points · ${Math.round(burnRows / scale)} lignes gravées<br>`
+      + `Durée estimée ≈ ${fmtDuration(seconds)} · S${fmt((o.powerMin / 100) * sMax())} à S${fmt((o.powerMax / 100) * sMax())}${hint}`;
+  }, 80);
+}
+$('#image-input').onchange = (e) => { openRaster(e.target.files[0]); e.target.value = ''; };
+$('#raster-mode').onclick = (e) => {
+  const b = e.target.closest('[data-rmode]');
+  if (!b) return;
+  raster.opts.mode = b.dataset.rmode;
+  store.set('raster', raster.opts);
+  fillRasterForm();
+  drawRaster();
+};
+$('#raster-form').addEventListener('input', (e) => {
+  const el = e.target.closest('[data-r]');
+  if (!el) return;
+  const k = el.dataset.r;
+  const o = raster.opts;
+  if (el.type === 'checkbox') o[k] = el.checked;
+  else if (el.tagName === 'SELECT') o[k] = el.value;
+  else {
+    const v = Number(el.value);
+    if (!(v >= 0) || el.value === '') return;
+    o[k] = v;
+    // Les proportions de l'image sont gardées.
+    if (k === 'width' && v > 0) o.height = r3(v * raster.aspect);
+    if (k === 'height' && v > 0) o.width = r3(v / raster.aspect);
+  }
+  store.set('raster', o);
+  fillRasterForm();
+  drawRaster();
+});
+$('#raster-cancel').onclick = closeRaster;
+$('#raster-go').onclick = async () => {
+  const o = raster.opts;
+  if (!(o.width > 0 && o.height > 0 && o.resolution > 0 && o.speed > 0)) return toast('Réglages de gravure invalides', 'err');
+  if (o.powerMax <= 0) return toast('Puissance max à 0 : rien ne serait gravé', 'err');
+  let r;
+  try {
+    r = rasterGcode(rasterPixels(1), { ...o, firmware: prof().firmware, sMax: sMax() });
+  } catch (e) { return toast(e.message, 'err'); }
+  if (!r.rows) return toast('Rien à graver avec ces réglages (image blanche ?)', 'err');
+  const name = `${raster.name || 'image'}-gravure.nc`;
+  closeRaster();
+  await act('load', { name, text: r.text })
+    .then(() => toast(`${name} : ${r.lines} lignes. Vérifiez-le dans la vue (Dessus), puis faites le cadre.`, 'ok'))
+    .catch(() => {});
+};
 
 // ---- Simulation avant usinage --------------------------------------------------
 
@@ -1233,7 +1501,7 @@ function openPreview() {
   $('#playbar').hidden = false;
   $('#btn-preview').classList.add('active');
   $('#btn-preview').textContent = '■ Simulation';
-  if (!preview.cutBounds) toast('Aucune passe sous Z0 : pas de matière à creuser', 'info');
+  if (!preview.cutBounds && !isLaser()) toast('Aucune passe sous Z0 : pas de matière à creuser', 'info');
   viewer.view('iso', { programOnly: true });
   preview.play();
 }
@@ -1442,6 +1710,7 @@ async function tryDemo() {
       await request('cmd', { line: '$H' });
       await waitUntil(() => S.machine.status.state === 'Idle', 30000);
     }
+    if (isLaser()) return laserDemo();
     // Zéro sur le coin avant gauche de la pièce virtuelle, dessus à Z −50 machine,
     // avec 10 mm de marge.
     await request('cmd', { line: 'G10L2P1X-210Y-190Z-50\nG90G0Z5\n$#\n$G' });
@@ -1462,6 +1731,28 @@ async function tryDemo() {
   } catch (e) {
     toast(e.message, 'err');
   }
+}
+
+// Démo laser : un disque dégradé de 40 mm gravé en niveaux de gris, généré ici
+// par le même code que « Image… ».
+async function laserDemo() {
+  await request('cmd', { line: 'G10L20P0X0Y0Z0\n$#\n$G' });
+  const n = 200, gray = new Uint8Array(n * n);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const r = Math.hypot(x - n / 2 + 0.5, y - n / 2 + 0.5) / (n / 2);
+      const ring = Math.abs(Math.sin(r * Math.PI * 3)) > 0.97;
+      gray[y * n + x] = r > 1 ? 255 : ring ? 0 : Math.round(255 * r);
+    }
+  }
+  const r = rasterGcode({ gray, width: n, height: n }, { resolution: 5, speed: 3000, powerMin: 5, powerMax: 60, firmware: prof().firmware, sMax: sMax() });
+  await request('load', { name: 'copeau-laser-demo.nc', text: r.text });
+  viewer.view('top');
+  toast('Démo laser prête : faites le cadre, puis Démarrer (gravure simulée)', 'ok');
+  const run = $('#btn-run');
+  run.classList.remove('pulse');
+  void run.offsetWidth;
+  run.classList.add('pulse');
 }
 
 // ---- Macros ----------------------------------------------------------------
@@ -1523,6 +1814,11 @@ const SETTING_NAMES = {
 function renderSettings() {
   const keys = Object.keys(S.settings).sort((a, b) => a - b);
   const list = $('#settings-list');
+  if (isSmoothie()) {
+    list.innerHTML = `<p class="muted">Smoothieware (Emblaser 2) n'a pas de réglages <code>$$</code> : ils sont dans le fichier <code>config</code> de la carte SD de la machine (vitesses, accélérations, <code>laser_module_maximum_s_value</code>…).</p>
+      <p class="muted">Lecture d'un réglage depuis la console : <code>config-get sd laser_module_maximum_s_value</code>. Copeau ne modifie pas ce fichier.</p>`;
+    return;
+  }
   if (!keys.length) { list.innerHTML = '<p class="muted">Connectez une machine pour lire ses réglages ($$).</p>'; return; }
   if (list.contains(document.activeElement)) return; // ne pas écraser une saisie en cours
   list.innerHTML = keys.map((k) => `
@@ -1552,8 +1848,27 @@ $('#settings-list').addEventListener('change', async (e) => {
 
 const INFO = {
   connect: { title: 'Connexion', html: `<p><b>Port</b> : la carte apparaît comme <code>/dev/cu.usbserial…</code> ou <code>/dev/cu.usbmodem…</code> sur Mac, <code>COM3</code>… sur Windows. <b>Simulateur</b> = machine virtuelle, sans risque.</p>
-    <p><b>Vitesse</b> : 115200 pour Grbl standard. Si rien ne répond, essayez 250000.</p>
-    <p>Un seul logiciel peut utiliser le port : fermez UGS, Candle ou CNCjs.</p>` },
+    <p><b>Type de machine</b> (premier menu) : <b>CNC Grbl</b>, <b>Laser Grbl</b> ($32=1) ou <b>Emblaser 2</b> (firmware Smoothieware). Il change les commandes envoyées et l'écran.</p>
+    <p><b>Réseau</b> : pour une machine en Wi-Fi ou Ethernet (Emblaser 2 en Wi-Fi, grblHAL…), tapez son adresse IP, éventuellement suivie du port (<code>192.168.1.50:23</code>).</p>
+    <p><b>Vitesse</b> : 115200 pour Grbl standard. Si rien ne répond, essayez 250000. Inutile pour l'Emblaser 2.</p>
+    <p>Un seul logiciel peut utiliser le port : fermez UGS, Candle, CNCjs, LightBurn ou LaserGRBL.</p>` },
+  laser: { title: 'Laser', html: `<p>Puissance laser en direct (% de la puissance max). Le laser ne tire que pendant les mouvements de gravure (G1) : jamais pendant les déplacements ni les jogs.</p>
+    <p>Avant chaque gravure : <b>couvercle fermé</b>, lunettes adaptées, aspiration en marche, et toujours quelqu'un à côté de la machine.</p>
+    <p>La correction <b>Puissance</b> (−10 / +10) agit pendant la gravure, sans modifier le fichier.</p>` },
+  pointer: { title: 'Tir de repérage', html: `<p>Allume le laser à très faible puissance, tête immobile, pour voir le point et placer l'origine. 1 % suffit en général ; au-delà de 5 % il marque la matière.</p>
+    <p>Il s'éteint au second clic, au bout de 60 s, si l'écran se déconnecte, et au démarrage interdit d'une gravure.</p>
+    <p>Grbl l'éteint pendant un jog : rallumez-le une fois la tête arrêtée. L'Emblaser 2 le garde allumé.</p>` },
+  frame: { title: 'Cadre du programme', html: `<p>La tête fait le tour du rectangle qui contient le programme, à la hauteur actuelle, <b>laser éteint</b>, pour vérifier qu'il tombe bien sur la matière.</p>
+    <p>Emblaser 2 : cochez <b>pointeur allumé</b> pour voir le trajet sur la matière (puissance du tir de repérage). <kbd>Échap</kbd> arrête.</p>` },
+  smax: { title: 'S max', html: `<p>Valeur de <code>S</code> qui correspond à 100 % de puissance dans le G-code.</p>
+    <p><b>Grbl</b> : <code>$30</code> de la carte (souvent 1000). <b>Emblaser 2 / Smoothieware</b> : <code>laser_module_maximum_s_value</code> du fichier config, 1 par défaut (S0.5 = 50 %).</p>
+    <p>Elle doit être la même que dans LightBurn ou LaserGRBL si vous y préparez vos fichiers. Elle sert à la gravure d'image, au tir de repérage et aux couleurs de la vue.</p>` },
+  image: { title: 'Graver une image', html: `<p>Comme LaserGRBL : l'image est balayée ligne par ligne, aller-retour. Un point = un pas de 1 / résolution mm.</p>
+    <p><b>Niveaux de gris</b> : la puissance suit la teinte (photos). <b>Noir et blanc</b> : tout ou rien selon le seuil (logos, textes). <b>Tramage</b> : points tout ou rien qui imitent les gris (photos sur bois clair).</p>
+    <p>L'image commence à X0 Y0 (coin bas gauche ou centre). Faites un essai sur une chute pour trouver vitesse et puissance.</p>` },
+  rResolution: { html: `<p>Nombre de lignes par millimètre. 10 (0,1 mm) convient à une diode de 5 W ; au-delà, les lignes se chevauchent et la gravure fonce sans gagner en détail.</p>` },
+  rPower: { html: `<p>En niveaux de gris, le blanc n'est pas gravé et le gris le plus clair commence à la puissance <b>min</b> ; le noir est gravé à la puissance <b>max</b>.</p>` },
+  rOverscan: { html: `<p>La tête démarre un peu avant chaque ligne, laser éteint, pour être à pleine vitesse quand elle commence à graver : les bords ne brûlent pas plus que le reste. Elle peut sortir de l'image de cette distance.</p>` },
   state: { title: 'Origine, déverrouillage, reset', html: `<p><b>Origine ($H)</b> : la machine va chercher ses fins de course, sa position devient exacte. À faire à chaque mise sous tension.</p>
     <p><b>Déverrouiller ($X)</b> : lève l'alarme sans bouger. Seulement si vous êtes sûr de la position.</p>
     <p><b>Reset</b> vide la mémoire de la carte. Ce n'est <b>pas</b> un arrêt d'urgence.</p>` },
@@ -1639,6 +1954,7 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+applyProfile();
 renderMachine();
 connectWs();
 const tourParam = new URLSearchParams(location.search).get('tour');

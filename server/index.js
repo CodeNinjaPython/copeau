@@ -7,8 +7,10 @@ import { WebSocketServer } from 'ws';
 import { marked } from 'marked';
 import { SerialPort } from 'serialport';
 import { GrblController } from './grbl.js';
-import { GrblSimulator } from './simulator.js';
+import { GrblSimulator, SmoothieSimulator } from './simulator.js';
+import { TcpTransport } from './tcp.js';
 import { routines } from './probe.js';
+import { PROFILES, profileOf, laserSMax } from '../public/js/shared/profiles.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 8000);
@@ -22,6 +24,7 @@ const dataDir = () => path.resolve(process.env.COPEAU_DATA_DIR || path.join(root
 const macrosFile = () => path.join(dataDir(), 'macros.json');
 const configFile = () => path.join(dataDir(), 'config.json');
 const SIMULATOR = 'simulateur';
+const NETWORK = 'reseau';
 const THREE_DIR = path.join(root, 'node_modules/three');
 
 const app = express();
@@ -112,7 +115,8 @@ let config = {};
 async function loadConfig() {
   try { config = JSON.parse(await fs.readFile(configFile(), 'utf8')); } catch { config = {}; }
 }
-const CONFIG_KEYS = ['zones'];
+// zones : plateau et zone de travail. machine : { profile, host, sMax }.
+const CONFIG_KEYS = ['zones', 'machine'];
 
 async function setConfig(key, value) {
   if (!CONFIG_KEYS.includes(key)) throw new Error(`Clé de configuration inconnue : ${key}`);
@@ -127,15 +131,21 @@ async function setConfig(key, value) {
 async function listPorts() {
   const ports = await SerialPort.list().catch(() => []);
   return [
-    { path: SIMULATOR, label: 'Simulateur Grbl (sans machine)' },
+    { path: SIMULATOR, label: 'Simulateur (sans machine)' },
+    { path: NETWORK, label: 'Réseau (Wi-Fi / Ethernet)…' },
     ...ports
       .filter((p) => !/Bluetooth|debug-console/i.test(p.path))
       .map((p) => ({ path: p.path, label: [p.path, p.manufacturer].filter(Boolean).join(' · ') })),
   ];
 }
 
-function openTransport(portPath, baudRate) {
-  if (portPath === SIMULATOR) return Promise.resolve(new GrblSimulator());
+// Le simulateur parle le dialecte du profil choisi (Grbl ou Smoothieware).
+function openTransport(portPath, baudRate, { profile, host } = {}) {
+  if (portPath === SIMULATOR) {
+    const p = profileOf(profile);
+    return Promise.resolve(p.firmware === 'smoothie' ? new SmoothieSimulator() : new GrblSimulator({ laser: p.laser }));
+  }
+  if (portPath === NETWORK) return TcpTransport.open(host);
   return new Promise((resolve, reject) => {
     const port = new SerialPort({ path: portPath, baudRate, autoOpen: false });
     port.open((err) => (err ? reject(err) : resolve(port)));
@@ -159,16 +169,60 @@ function guardJobLines(lines) {
   }
 }
 
+// ---- Laser : tir de repérage ---------------------------------------------------
+// Éteint tout seul au bout de POINTER_MAX_MS, ou si l'écran qui l'a allumé se
+// déconnecte.
+
+const POINTER_MAX_MS = 60000;
+let pointerTimer = null;
+let pointerOwner = null;
+
+function machineConfig() {
+  return { profile: 'cnc', host: '', sMax: null, ...(config.machine || {}) };
+}
+const currentSMax = () => machineConfig().sMax > 0 ? machineConfig().sMax : laserSMax(grbl.profile, grbl.settings);
+
+async function pointerOff(reason) {
+  clearTimeout(pointerTimer);
+  pointerTimer = null;
+  pointerOwner = null;
+  if (!grbl.pointer) return;
+  // Une carte qui ne répond plus ne doit pas bloquer la déconnexion.
+  const timeout = new Promise((resolve) => setTimeout(resolve, 1500));
+  await Promise.race([grbl.laserPointer(false).catch((e) => grbl.log('err', e.message)), timeout]);
+  if (reason) grbl.log('info', reason);
+}
+
+// Smoothieware : corrections par G-code. M220 = avance, M221 = puissance laser.
+// Elles passent devant les lignes du programme et s'appliquent aussitôt.
+const SMOOTHIE_OVERRIDES = {
+  feed100: ['M220', 'feed', () => 100], feedPlus10: ['M220', 'feed', (v) => v + 10], feedMinus10: ['M220', 'feed', (v) => v - 10],
+  feedPlus1: ['M220', 'feed', (v) => v + 1], feedMinus1: ['M220', 'feed', (v) => v - 1],
+  spindle100: ['M221', 'spindle', () => 100], spindlePlus10: ['M221', 'spindle', (v) => v + 10], spindleMinus10: ['M221', 'spindle', (v) => v - 10],
+  spindlePlus1: ['M221', 'spindle', (v) => v + 1], spindleMinus1: ['M221', 'spindle', (v) => v - 1],
+};
+
 const handlers = {
   async ports() { return listPorts(); },
+  async profiles() { return Object.values(PROFILES); },
 
-  async connect({ port, baud = 115200 }) {
+  async connect({ port, baud = 115200, profile, host }) {
     if (grbl.connected) grbl.detach('Changement de port');
-    const transport = await openTransport(port, Number(baud));
-    grbl.attach(transport, port);
+    const machine = { ...machineConfig(), ...(profile ? { profile: profileOf(profile).id } : {}), ...(port === NETWORK ? { host: String(host || '') } : {}) };
+    const transport = await openTransport(port, Number(baud), machine);
+    grbl.attach(transport, port === NETWORK ? `${port}:${machine.host}` : port, { profile: machine.profile });
+    if (JSON.stringify(machine) !== JSON.stringify(machineConfig())) await setConfig('machine', machine).catch(() => {});
   },
 
-  async disconnect() { grbl.detach('Déconnecté par l\'utilisateur'); },
+  async disconnect() { await pointerOff(); grbl.detach('Déconnecté par l\'utilisateur'); },
+
+  async laserPointer({ on, power }, ws) {
+    if (!on) return pointerOff();
+    await grbl.laserPointer(true, { power: Number(power), sMax: currentSMax() });
+    clearTimeout(pointerTimer);
+    pointerOwner = ws;
+    pointerTimer = setTimeout(() => pointerOff(`Tir de repérage éteint automatiquement après ${POINTER_MAX_MS / 1000} s`), POINTER_MAX_MS);
+  },
 
   async cmd({ line }) {
     const lines = String(line).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -176,14 +230,26 @@ const handlers = {
     for (const l of lines) grbl.cmd(l).catch(() => {}); // l'erreur est déjà journalisée
   },
 
-  async realtime({ name }) { grbl.realtime(name); },
+  async realtime({ name }) {
+    const ov = grbl.isSmoothie && SMOOTHIE_OVERRIDES[name];
+    if (ov) {
+      const [code, key, next] = ov;
+      if (!grbl.ready) throw new Error('Machine non prête');
+      const cur = key === 'feed' ? grbl.status.ov?.feed ?? 100 : grbl.status.ov?.spindle ?? 100;
+      const pct = Math.max(10, Math.min(200, Math.round(next(cur))));
+      grbl.status.ov = { ...grbl.status.ov, [key]: pct };
+      await grbl.cmd(`${code}S${pct}`, 'override');
+      grbl.emitState();
+      return;
+    }
+    grbl.realtime(name);
+  },
 
   async jog({ axes, feed }) {
-    const parts = Object.entries(axes)
-      .filter(([a, v]) => a in AXIS_INDEX && Math.abs(Number(v)) >= 0.001)
-      .map(([a, v]) => `${a}${Number(v).toFixed(3)}`);
-    if (!parts.length) return;
-    await grbl.cmd(`$J=G91G21${parts.join('')}F${Number(feed) || 1000}`, 'jog');
+    const moves = Object.fromEntries(Object.entries(axes)
+      .filter(([a, v]) => a in AXIS_INDEX && Math.abs(Number(v)) >= 0.001));
+    if (!Object.keys(moves).length) return;
+    await grbl.jogMove(moves, { relative: true, feed: Number(feed) || 1000 });
   },
 
   // Amène la tête en X/Y (repère travail), après une éventuelle montée en Z.
@@ -196,64 +262,70 @@ const handlers = {
     let f = Number(feed) || 1000;
     if (axis === 'Z' && grbl.status.wpos.Z > 0) f = Math.min(f, Number(plungeFeed) || 300);
     grbl.log('info', `Retour de ${axis} à l'origine`);
-    await grbl.cmd(`$J=G90G21${axis}0F${f}`, 'jog');
+    await grbl.jogMove({ [axis]: 0 }, { feed: f });
   },
 
   async gotoOrigin({ liftZ, feed, plungeFeed }) {
     const f = Number(feed) || 1000;
     const pf = Math.min(f, Number(plungeFeed) || 300);
     const lift = Number(liftZ);
-    if (Number.isFinite(lift) && grbl.status.wpos.Z < lift) {
-      await grbl.cmd(`$J=G90G21Z${lift.toFixed(3)}F${f}`, 'jog');
+    if (liftZ !== null && liftZ !== undefined && Number.isFinite(lift) && grbl.status.wpos.Z < lift) {
+      await grbl.jogMove({ Z: lift }, { feed: f });
     }
     grbl.log('info', 'Retour à l\'origine X0 Y0 Z0');
-    await grbl.cmd(`$J=G90G21X0Y0F${f}`, 'jog');
-    await grbl.cmd(`$J=G90G21Z0F${pf}`, 'jog');
+    await grbl.jogMove({ X: 0, Y: 0 }, { feed: f });
+    await grbl.jogMove({ Z: 0 }, { feed: pf });
   },
 
   async jogTo({ X, Y, liftZ, feed }) {
     const f = Number(feed) || 1000;
     if (![X, Y].every(Number.isFinite)) throw new Error('Cible invalide');
     if (liftZ !== null && liftZ !== undefined && grbl.status.wpos.Z < Number(liftZ)) {
-      await grbl.cmd(`$J=G90G21Z${Number(liftZ).toFixed(3)}F${f}`, 'jog');
+      await grbl.jogMove({ Z: Number(liftZ) }, { feed: f });
     }
     grbl.log('info', `Déplacement vers X${X} Y${Y}`);
-    await grbl.cmd(`$J=G90G21X${X.toFixed(3)}Y${Y.toFixed(3)}F${f}`, 'jog');
+    await grbl.jogMove({ X, Y }, { feed: f });
   },
 
   // Parcourt une suite de points (repère travail) en jog, par exemple le contour
   // de la zone de travail. Les points partent un par un : un arrêt (Échap)
   // n'a ainsi au plus qu'une ligne en route à annuler.
-  async jogPath({ points, liftZ, feed }) {
+  // pointer : % du tir de repérage gardé allumé pendant le parcours (cadre
+  // d'un job laser). Seul Smoothieware le garde en G0 ; Grbl l'éteint en jog.
+  async jogPath({ points, liftZ, feed, pointer }) {
     if (pathRun) throw new Error('Un parcours est déjà en cours');
     if (!Array.isArray(points) || points.length < 2 || points.length > 400) throw new Error('Parcours invalide');
     if (!points.every((p) => Number.isFinite(p.X) && Number.isFinite(p.Y))) throw new Error('Parcours invalide');
     const f = Number(feed) || 1000;
+    const withPointer = Number(pointer) > 0 && grbl.isSmoothie && !grbl.pointer;
+    if (withPointer) await grbl.laserPointer(true, { power: Number(pointer), sMax: currentSMax() });
     const run = (pathRun = { abort: false });
     try {
       if (liftZ !== null && liftZ !== undefined && grbl.status.wpos.Z < Number(liftZ)) {
-        await grbl.cmd(`$J=G90G21Z${Number(liftZ).toFixed(3)}F${f}`, 'jog');
+        await grbl.jogMove({ Z: Number(liftZ) }, { feed: f });
       }
       grbl.log('info', `Parcours du contour (${points.length} points)`);
       for (const p of points) {
         if (run.abort) break;
-        await grbl.cmd(`$J=G90G21X${p.X.toFixed(3)}Y${p.Y.toFixed(3)}F${f}`, 'jog');
+        await grbl.jogMove({ X: p.X, Y: p.Y }, { feed: f });
       }
+      // Le pointeur reste allumé jusqu'à la fin réelle du mouvement.
+      if (withPointer && !run.abort) await grbl.cmd(grbl.syncLine, 'sync');
     } finally {
       pathRun = null;
+      if (withPointer) await grbl.laserPointer(false).catch(() => {});
     }
-    if (run.abort) grbl.realtime('jogCancel');
+    if (run.abort) await grbl.jogStop();
   },
 
   // Annulation du jog. Comme le recommande la doc Grbl, un G4P0 suit
   // l'annulation : son « ok » arrive une fois l'arrêt terminé, la position
   // lue ensuite est donc la position finale.
-  async jogStop() {
+  // gentle (relâchement d'un jog maintenu) : avec Smoothieware, qui ne sait
+  // pas annuler un mouvement en douceur, on finit le pas en cours.
+  async jogStop({ gentle = false } = {}) {
     if (pathRun) pathRun.abort = true;
-    if (!grbl.ready) return;
-    grbl.dropQueued('jog');
-    grbl.realtime('jogCancel');
-    await grbl.cmd('G4P0', 'sync').catch(() => {});
+    await grbl.jogStop({ gentle: !!gentle });
   },
 
   async getConfig() { return config; },
@@ -305,6 +377,10 @@ wss.on('connection', (ws) => {
   if (grbl.job) send({ t: 'job-text', name: grbl.job.name, text: grbl.job.text });
   send({ t: 'job', j: grbl.jobSnapshot() });
 
+  ws.on('close', () => {
+    if (pointerOwner === ws) pointerOff('Tir de repérage éteint : écran déconnecté');
+  });
+
   ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
@@ -343,6 +419,7 @@ export async function startServer({ port = PORT, host = HOST, threeAddonsDir, da
 }
 
 export async function stopServer() {
+  await pointerOff();
   if (grbl.connected) grbl.detach('Application fermée');
   for (const ws of wss.clients) ws.terminate();
   if (server.listening) {
