@@ -319,34 +319,44 @@ $('#jog-feed').onchange = () => store.set('jogFeed', Number($('#jog-feed').value
 
 const parseJog = (spec) => Object.fromEntries(spec.split(' ').map((p) => [p[0], Number(p.slice(1))]));
 
-// Appui court = un pas, appui maintenu = jog continu jusqu'au relâchement.
+// Appui = un pas de la taille choisie. Appui maintenu = le même pas répété
+// (1, 1, 1… ou 10, 10, 10…) au rythme où la machine le parcourt, avec au plus
+// un pas d'avance. Au relâchement, le pas en cours se termine : la position
+// reste sur la grille du pas. ■ ou Échap arrêtent net.
 function makeJogger() {
-  let timer = null, continuous = false;
+  let holdTimer = null, repeatTimer = null, dir = null;
+  const feed = () => Number($('#jog-feed').value) || 1000;
+  const stepOnce = () => {
+    const axes = Object.fromEntries(Object.entries(dir).map(([a, v]) => [a, v * jogStep]));
+    request('jog', { axes, feed: feed() }).catch((e) => toastOnce(e.message));
+  };
+  const stop = () => {
+    clearTimeout(holdTimer);
+    clearInterval(repeatTimer);
+    holdTimer = repeatTimer = null;
+  };
   return {
-    press(dir) {
-      if (timer || continuous) return;
-      timer = setTimeout(() => {
-        timer = null;
-        continuous = true;
-        act('jog', { axes: dir, feed: Number($('#jog-feed').value), continuous: true }).catch(() => {});
-      }, 280);
+    press(d) {
+      if (holdTimer || repeatTimer) return;
+      dir = d;
+      stepOnce();
+      holdTimer = setTimeout(() => {
+        holdTimer = null;
+        // Durée d'un pas à la vitesse jog (diagonale comprise).
+        const dist = jogStep * Math.hypot(...Object.values(dir));
+        const ms = Math.max(40, (dist / feed()) * 60000);
+        stepOnce(); // un pas d'avance pour un mouvement fluide
+        repeatTimer = setInterval(stepOnce, ms);
+      }, 300);
     },
-    release(dir) {
-      if (timer) {
-        clearTimeout(timer);
-        timer = null;
-        const axes = Object.fromEntries(Object.entries(dir).map(([a, v]) => [a, v * jogStep]));
-        act('jog', { axes, feed: Number($('#jog-feed').value) }).catch(() => {});
-      } else if (continuous) {
-        continuous = false;
-        act('jogStop').catch(() => {});
-      }
-    },
+    release: stop,
   };
 }
 
+const buttonJoggers = [];
 for (const b of $$('[data-jog]')) {
   const j = makeJogger();
+  buttonJoggers.push(j);
   const dir = parseJog(b.dataset.jog);
   b.addEventListener('pointerdown', (e) => { if (b.disabled) return; b.setPointerCapture(e.pointerId); b.classList.add('active'); j.press(dir); });
   const up = () => { b.classList.remove('active'); j.release(dir); };
@@ -406,10 +416,13 @@ document.addEventListener('keyup', (e) => {
 // Après un choix dans un menu, on rend le focus à la page pour le clavier.
 $$('select').forEach((sel) => sel.addEventListener('change', () => sel.blur()));
 window.addEventListener('blur', () => {
+  // La fenêtre perd le focus : aucun relâchement de touche ne viendra.
   for (const code of Object.keys(heldKeys)) {
     $(`[data-jog="${KEY_BUTTON[heldKeys[code].key]}"]`)?.classList.remove('active');
+    heldKeys[code].jogger.release();
     delete heldKeys[code];
   }
+  for (const j of buttonJoggers) j.release();
   act('jogStop').catch(() => {});
 });
 
@@ -1305,7 +1318,7 @@ const TOUR = [
   },
   {
     target: '.jog', title: 'Déplacer la tête',
-    body: `<p><b>Appui court</b> = un pas de la taille choisie, <b>appui maintenu</b> = mouvement continu jusqu'au relâchement.</p>
+    body: `<p><b>Appui</b> = un pas de la taille choisie. <b>Appui maintenu</b> = le même pas répété (avec 1 : 1 mm, 1 mm, 1 mm…), arrêt sur un multiple du pas au relâchement.</p>
       <p>Au clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> pour X/Y, <kbd>+</kbd><kbd>−</kbd> ou <kbd>PgUp</kbd><kbd>PgDn</kbd> pour Z, <kbd>Échap</kbd> pour arrêter.</p>`,
   },
   {
@@ -1507,7 +1520,8 @@ const INFO = {
   dro: { title: 'Position travail et machine', html: `<p><b>Grands chiffres</b> : position par rapport au zéro de la pièce (G54). C'est le repère du programme.</p>
     <p><b>Ligne M</b> : position machine, par rapport aux fins de course. Elle ne change pas quand on refait le zéro.</p>
     <p><b>X = 0</b> pose le zéro à la position actuelle. <b>Cliquez un chiffre</b> pour taper une valeur, par exemple 20 si l'outil est posé sur une cale de 20 mm. Le zéro reste mémorisé dans la carte.</p>` },
-  jog: { title: 'Déplacer la tête', html: `<p><b>Appui court</b> : un pas de la taille choisie. <b>Appui maintenu</b> : mouvement continu jusqu'au relâchement.</p>
+  jog: { title: 'Déplacer la tête', html: `<p><b>Appui</b> : un pas de la taille choisie. <b>Appui maintenu</b> : le même pas répété (avec 10 : 10 mm, 10 mm, 10 mm…). Au relâchement, le pas en cours se termine, la position reste un multiple du pas.</p>
+    <p><b>■</b> ou <kbd>Échap</kbd> arrêtent tout de suite.</p>
     <p>Clavier : <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> X/Y, <kbd>+</kbd><kbd>−</kbd> ou <kbd>PgUp</kbd><kbd>PgDn</kbd> Z, <kbd>Échap</kbd> stop.</p>
     <p>Bloqué en alarme et pendant l'usinage. Si l'écran perd la connexion, le mouvement s'arrête.</p>` },
   jogFeed: { title: 'Vitesse jog', html: `<p>Vitesse des déplacements manuels, en mm/min. 2000 convient en général ; réduisez près de la pièce.</p><p>Grbl la plafonne à la vitesse max de chaque axe ($110 à $112).</p>` },
