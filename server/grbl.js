@@ -57,6 +57,7 @@ export class GrblController extends EventEmitter {
     this.lastProbe = null;
     this.statusWaiters = [];
     this.spindleHeld = false; // broche coupée par Copeau pendant une pause
+    this.spindleStopPending = false;
     this.restoreOnUnlock = null; // modes à rétablir quand l'alarme est levée
   }
 
@@ -422,32 +423,39 @@ export class GrblController extends EventEmitter {
     this.job.state = 'paused';
     this.realtime('hold');
     this.emitJob();
-    if (stopSpindle) this.stopSpindleInPause().catch((e) => this.log('err', e.message));
+    if (stopSpindle) return this.stopSpindleInPause();
   }
 
   // Coupe la broche pendant une pause. Grbl n'accepte « spindle stop » (0x9E)
   // qu'une fois le mouvement complètement arrêté (Hold:0) : on attend cet état.
   async stopSpindleInPause() {
     if (this.spindleHeld) return;
-    const deadline = Date.now() + 8000;
-    let s = this.status;
-    while (!(s.state === 'Hold' && s.subState === '0')) {
-      if (Date.now() > deadline || !['Hold', 'Run'].includes(s.state)) {
-        throw new Error('Broche non coupée : la machine doit être en pause complète');
+    if (this.spindleStopPending) throw new Error('Attendez la coupure de la sortie avant de reprendre.');
+    this.spindleStopPending = true;
+    try {
+      const deadline = Date.now() + 8000;
+      let s = this.status;
+      while (!(s.state === 'Hold' && s.subState === '0')) {
+        if (Date.now() > deadline || !['Hold', 'Run'].includes(s.state)) {
+          throw new Error('Broche non coupée : la machine doit être en pause complète');
+        }
+        s = await this.nextStatus();
       }
-      s = await this.nextStatus();
+      this.realtime('spindleStop');
+      this.spindleHeld = true;
+      this.log('info', 'Broche coupée pendant la pause');
+      this.emitState();
+      this.emitJob();
+    } finally {
+      this.spindleStopPending = false;
     }
-    this.realtime('spindleStop');
-    this.spindleHeld = true;
-    this.log('info', 'Broche coupée pendant la pause');
-    this.emitState();
-    this.emitJob();
   }
 
   // Reprise après une pause (ou un M0). Si la broche a été coupée : rallumage,
   // attente de la montée en vitesse, puis seulement reprise du mouvement.
   async resumeJob({ spinUp = 3 } = {}) {
     const j = this.job;
+    if (this.spindleStopPending) throw new Error('Attendez la coupure de la sortie avant de reprendre.');
     // Pause du programme (M0) ou porte de sécurité : Grbl attend un « ~ ».
     const programPause = j?.state === 'running' && ['Hold', 'Door'].includes(this.status.state);
     if (j?.state !== 'paused' && !programPause) return;

@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createState, step, arcPoints } from './shared/gcode.js';
 
+const cssColor = (name) => new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue(name).trim());
 const COLORS = {
-  feed: new THREE.Color(0x5aa9ff),
-  rapid: new THREE.Color(0x4a515e),
-  feedDone: new THREE.Color(0xf08a24),
-  feedPreview: new THREE.Color(0x3ecf8e),
-  rapidPreview: new THREE.Color(0x2f5d48),
-  rapidDone: new THREE.Color(0x6b4a2a),
+  feed: cssColor('--info'),
+  rapid: cssColor('--viewer-rapid'),
+  feedDone: cssColor('--accent'),
+  feedPreview: cssColor('--ok'),
+  rapidPreview: cssColor('--viewer-rapid-preview'),
+  rapidDone: cssColor('--viewer-rapid-done'),
 };
 
 export class Viewer {
@@ -19,9 +20,9 @@ export class Viewer {
     el.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0b0d10);
+    this.scene.background = cssColor('--viewer-bg');
     // Éclairage pour la matière simulée (les lignes n'en dépendent pas).
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x30343c, 1.1));
+    this.scene.add(new THREE.HemisphereLight(0xffffff, cssColor('--viewer-neutral-light'), 1.1));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
     sun.position.set(-0.5, -0.8, 1.4);
     this.scene.add(sun);
@@ -41,19 +42,19 @@ export class Viewer {
       const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), to]);
       return new THREE.Line(g, new THREE.LineBasicMaterial({ color }));
     };
-    this.scene.add(axis(new THREE.Vector3(25, 0, 0), 0xff6b6b));
-    this.scene.add(axis(new THREE.Vector3(0, 25, 0), 0x4ade80));
-    this.scene.add(axis(new THREE.Vector3(0, 0, 25), 0x60a5fa));
+    this.scene.add(axis(new THREE.Vector3(25, 0, 0), cssColor('--x')));
+    this.scene.add(axis(new THREE.Vector3(0, 25, 0), cssColor('--y')));
+    this.scene.add(axis(new THREE.Vector3(0, 0, 25), cssColor('--z')));
 
     // Outil : cône dont la pointe est à l'origine de l'objet.
     const cone = new THREE.ConeGeometry(3, 14, 24);
     cone.rotateX(-Math.PI / 2);
     cone.translate(0, 0, 7);
-    this.tool = new THREE.Mesh(cone, new THREE.MeshBasicMaterial({ color: 0xf5c84b, transparent: true, opacity: 0.85 }));
+    this.tool = new THREE.Mesh(cone, new THREE.MeshBasicMaterial({ color: cssColor('--viewer-tool'), transparent: true, opacity: 0.85 }));
     this.scene.add(this.tool);
 
     // Outil fantôme de la simulation (l'outil jaune reste la position réelle).
-    this.ghost = new THREE.Mesh(cone.clone(), new THREE.MeshBasicMaterial({ color: 0x3ecf8e, transparent: true, opacity: 0.9 }));
+    this.ghost = new THREE.Mesh(cone.clone(), new THREE.MeshBasicMaterial({ color: cssColor('--ok'), transparent: true, opacity: 0.9 }));
     this.ghost.visible = false;
     this.scene.add(this.ghost);
     this.previewSeg = null;
@@ -64,12 +65,12 @@ export class Viewer {
 
     // Cible du "cliquer pour déplacer" : anneau + croix posés sur le plateau.
     this.target = new THREE.Group();
-    const ring = new THREE.Mesh(new THREE.RingGeometry(2.2, 3, 32), new THREE.MeshBasicMaterial({ color: 0x3ecf8e, side: THREE.DoubleSide }));
+    const ring = new THREE.Mesh(new THREE.RingGeometry(2.2, 3, 32), new THREE.MeshBasicMaterial({ color: cssColor('--ok'), side: THREE.DoubleSide }));
     const cross = new THREE.LineSegments(
       new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(-5, 0, 0), new THREE.Vector3(5, 0, 0), new THREE.Vector3(0, -5, 0), new THREE.Vector3(0, 5, 0),
       ]),
-      new THREE.LineBasicMaterial({ color: 0x3ecf8e }),
+      new THREE.LineBasicMaterial({ color: cssColor('--ok') }),
     );
     this.target.add(ring, cross);
     this.target.visible = false;
@@ -79,6 +80,8 @@ export class Viewer {
     this.segLine = null;
     this.segRapid = null;
     this.lineEnd = [];
+    this.laserMode = false;
+    this.laserColor = new THREE.Color();
     this.done = 0;
     this.onClick = null;
     this.onHover = null;
@@ -158,8 +161,8 @@ export class Viewer {
   setGrid(size) {
     this.grid.clear();
     const s = Math.max(50, Math.ceil(size / 10) * 10);
-    const minor = new THREE.GridHelper(s * 2, (s * 2) / 10, 0x1f242c, 0x1f242c);
-    const major = new THREE.GridHelper(s * 2, (s * 2) / 50, 0x2c333d, 0x2c333d);
+    const minor = new THREE.GridHelper(s * 2, (s * 2) / 10, cssColor('--viewer-grid-minor'), cssColor('--viewer-grid-minor'));
+    const major = new THREE.GridHelper(s * 2, (s * 2) / 50, cssColor('--viewer-grid-major'), cssColor('--viewer-grid-major'));
     for (const g of [minor, major]) { g.rotateX(Math.PI / 2); this.grid.add(g); }
     major.position.z = 0.01;
   }
@@ -203,6 +206,7 @@ export class Viewer {
     const segLine = [];
     const segRapid = [];
     const segFeed = [];
+    const segPower = [];
     this.lineEnd = new Array(lines.length);
     const st = createState();
     lines.forEach((line, i) => {
@@ -212,6 +216,7 @@ export class Viewer {
           segLine.push(i);
           segRapid.push(seg.kind === 'rapid' ? 1 : 0);
           segFeed.push(seg.feed || 0);
+          segPower.push(seg.power || 0);
         };
         if (seg.kind === 'arc') {
           let prev = seg.from;
@@ -226,6 +231,7 @@ export class Viewer {
     this.segLine = Uint32Array.from(segLine);
     this.segRapid = Uint8Array.from(segRapid);
     this.segFeed = Float32Array.from(segFeed);
+    this.segPower = Float32Array.from(segPower);
     this.previewSeg = null;
     this.ghost.visible = false;
     const geom = new THREE.BufferGeometry();
@@ -248,17 +254,36 @@ export class Viewer {
     const col = this.path.geometry.attributes.color;
     for (let s = from; s < to; s++) {
       let c;
+      const laser = this.laserMode && !this.segRapid[s] && this.segPower[s] > 0;
       if (this.previewSeg !== null) {
         const done = s < this.previewSeg;
-        c = this.segRapid[s] ? (done ? COLORS.rapidPreview : COLORS.rapid) : (done ? COLORS.feedPreview : COLORS.feed);
+        c = this.segRapid[s] ? (done ? COLORS.rapidPreview : COLORS.rapid)
+          : laser ? this.powerColor(this.segPower[s], done) : (done ? COLORS.feedPreview : COLORS.feed);
       } else {
         const done = this.segLine[s] < this.done;
-        c = this.segRapid[s] ? (done ? COLORS.rapidDone : COLORS.rapid) : (done ? COLORS.feedDone : COLORS.feed);
+        c = this.segRapid[s] ? (done ? COLORS.rapidDone : COLORS.rapid)
+          : laser ? this.powerColor(this.segPower[s], done) : (done ? COLORS.feedDone : COLORS.feed);
       }
       col.setXYZ(s * 2, c.r, c.g, c.b);
       col.setXYZ(s * 2 + 1, c.r, c.g, c.b);
     }
     col.needsUpdate = true;
+  }
+
+  powerColor(power, done) {
+    const level = Math.min(1, power / 1000);
+    return this.laserColor.setRGB(
+      done ? 0.45 + level * 0.45 : 0.35 + level * 0.65,
+      done ? 0.08 + level * 0.16 : 0.035 + level * 0.12,
+      0.015,
+    );
+  }
+
+  setLaserMode(enabled) {
+    if (this.laserMode === enabled) return;
+    this.laserMode = enabled;
+    if (this.path) this.paint(0, this.segLine.length);
+    this.render();
   }
 
   // Les lignes d'index < doneLines sont exécutées.
@@ -349,7 +374,7 @@ export class Viewer {
       this.shapes.add(edges);
     }
     if (zone) add(zone, { line: 0xf5c84b, fill: 0xf5c84b, fillOpacity: 0.07, z: 0.02 });
-    if (preview) add(preview, { line: 0x3ecf8e, z: 0.04, dashed: true });
+    if (preview) add(preview, { line: cssColor('--ok'), z: 0.04, dashed: true });
     const changed = (this.shapesBox ? JSON.stringify(this.shapesBox) : '') !== (box.isEmpty() ? '' : JSON.stringify(box));
     this.shapesBox = box.isEmpty() ? null : box;
     if (changed) this.fitGrid();

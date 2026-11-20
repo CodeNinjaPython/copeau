@@ -119,7 +119,9 @@ test('pause : broche coupée puis rallumée avant la reprise', async () => {
     c.loadJob('broche.nc', prog);
     c.runJob(0);
     await waitFor(() => c.status.state === 'Run' && c.status.speed > 0);
-    c.pauseJob({ stopSpindle: true });
+    const pausing = c.pauseJob({ stopSpindle: true });
+    await assert.rejects(c.resumeJob({ spinUp: 0 }), /Attendez la coupure/);
+    await pausing;
     await waitFor(() => c.spindleHeld);
     await c.nextStatus();
     assert.equal(c.status.speed, 0, 'broche arrêtée pendant la pause');
