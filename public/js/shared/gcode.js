@@ -57,7 +57,7 @@ const PLANES = {
 };
 
 // Exécute une ligne nettoyée sur l'état. emit(seg) est appelé pour chaque
-// mouvement : { kind: 'rapid'|'feed'|'arc', from, to, feed, center?, cw?, plane? }
+// mouvement : { kind: 'rapid'|'feed'|'arc', from, to, feed, power, center?, cw?, plane? }
 export function step(state, line, emit) {
   if (!line || line[0] === '$') return null;
   const words = tokenize(line);
@@ -115,7 +115,10 @@ export function step(state, line, emit) {
 
   const m = state.motion;
   if (m === 0 || m === 1) {
-    emit && emit({ kind: m === 0 ? 'rapid' : 'feed', from, to, feed: state.feed });
+    emit && emit({
+      kind: m === 0 ? 'rapid' : 'feed', from, to, feed: state.feed,
+      power: m === 1 && state.spindle === 4 ? state.speed : 0,
+    });
   } else if (m === 2 || m === 3) {
     const pl = PLANES[state.plane];
     let ci, cj;
@@ -134,7 +137,10 @@ export function step(state, line, emit) {
       cj = (p[pl.j] ?? 0) * k;
     }
     const center = { [pl.a]: from[pl.a] + ci, [pl.b]: from[pl.b] + cj };
-    emit && emit({ kind: 'arc', from, to, feed: state.feed, center, cw: m === 2, plane: state.plane });
+    emit && emit({
+      kind: 'arc', from, to, feed: state.feed, power: state.spindle === 4 ? state.speed : 0,
+      center, cw: m === 2, plane: state.plane,
+    });
   }
   // G38.x : le point final réel dépend du contact, on suppose la cible.
   state.pos = to;

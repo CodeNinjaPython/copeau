@@ -112,7 +112,7 @@ let config = {};
 async function loadConfig() {
   try { config = JSON.parse(await fs.readFile(configFile(), 'utf8')); } catch { config = {}; }
 }
-const CONFIG_KEYS = ['zones'];
+const CONFIG_KEYS = ['zones', 'laser'];
 
 async function setConfig(key, value) {
   if (!CONFIG_KEYS.includes(key)) throw new Error(`Clé de configuration inconnue : ${key}`);
@@ -263,7 +263,7 @@ const handlers = {
   async run({ from = 0, toolChange = true, spinUp = 3, safeZ = 5 }) {
     grbl.runJob(Number(from), { toolChange, spinUpSeconds: Number(spinUp), minSafeZ: Number(safeZ) });
   },
-  async pause({ stopSpindle = false }) { grbl.pauseJob({ stopSpindle: !!stopSpindle }); },
+  async pause({ stopSpindle = false }) { await grbl.pauseJob({ stopSpindle: !!stopSpindle }); },
   async resume({ spinUp = 3 }) {
     const s = Math.max(0, Math.min(30, Number(spinUp) || 0));
     grbl.resumeJob({ spinUp: s }).catch((e) => grbl.log('err', e.message));

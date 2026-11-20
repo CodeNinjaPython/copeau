@@ -15,8 +15,16 @@
   </script>
 </head>
 <body>
-  <header class="topbar">
+  <div class="workspace-bar">
     <div class="brand"><span class="logo"></span>Copeau</div>
+    <nav class="workspace-tabs" role="tablist" aria-label="Espaces de travail">
+      <button type="button" id="workspace-cnc" data-workspace="cnc" role="tab" aria-controls="workspace-panel" aria-selected="true">CNC</button>
+      <button type="button" id="workspace-laser" data-workspace="laser" role="tab" aria-controls="workspace-panel" aria-selected="false" tabindex="-1">Laser</button>
+      <button type="button" id="workspace-configuration" data-workspace="configuration" role="tab" aria-controls="workspace-panel" aria-selected="false" tabindex="-1">Configuration</button>
+    </nav>
+    <span id="program-mode" class="program-mode" role="status" title="L'espace de travail ne change pas le mode du programme.">Programme : CNC</span>
+  </div>
+  <header class="topbar">
     <div class="connect">
       <select id="port" aria-label="Port"></select>
       <select id="baud" aria-label="Vitesse">
@@ -27,7 +35,7 @@
       <button type="button" class="ibtn" data-info="connect" aria-label="Plus d'informations" aria-expanded="false">i</button>
     </div>
     <div class="machine-state">
-      <span id="state-badge" class="badge">Déconnecté</span>
+      <span id="state-badge" class="badge" role="status" aria-live="polite" aria-atomic="true">Déconnecté</span>
       <button id="btn-unlock" class="ghost" title="Déverrouiller ($X)">Déverrouiller</button>
       <button id="btn-home" class="ghost" title="Prise d'origine ($H)">Origine</button>
       <button id="btn-reset" class="danger" title="Reset logiciel (Ctrl-X)">Reset</button>
@@ -39,9 +47,9 @@
     </div>
   </header>
 
-  <div id="alarm-bar" class="alarm-bar" hidden></div>
+  <div id="alarm-bar" class="alarm-bar" role="alert" aria-atomic="true" hidden></div>
 
-  <main class="layout">
+  <main id="workspace-panel" class="layout" role="tabpanel" aria-labelledby="workspace-cnc">
     <!-- Colonne gauche : position et déplacements -->
     <section class="panel left">
       <div class="dro">
@@ -116,7 +124,7 @@
         <button id="btn-preview" class="ghost" title="Voir l'usinage simulé avant de lancer">▶ Simuler</button>
         <button type="button" class="ibtn" data-info="viewer" aria-label="Plus d'informations" aria-expanded="false">i</button>
       </div>
-      <div class="drop-hint" id="drop-hint">Glissez un fichier G-code ici</div>
+      <div class="drop-hint" id="drop-hint">Glissez un fichier G-code, SVG ou image ici</div>
       <div class="goto-pop" id="goto-pop" hidden>
         <div class="goto-coords" id="goto-coords"></div>
         <label class="check small"><input type="checkbox" id="goto-lift" checked> Monter d'abord à Z <span id="goto-safe">5</span> <button type="button" class="ibtn" data-info="gotoLift" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
@@ -151,14 +159,14 @@
         <button type="button" class="ibtn" data-info="sim" aria-label="Plus d'informations" aria-expanded="false">i</button>
         <button id="pb-close" class="ghost pb-btn" title="Quitter la simulation">✕</button>
       </div>
-      <div class="job-bar" id="job-bar">
+      <div class="job-bar" id="job-bar" tabindex="-1">
         <div class="job-name"><span id="job-name">Aucun programme</span><span class="muted small" id="job-meta"></span></div>
         <div class="progress"><div id="job-progress"></div></div>
         <div class="job-times muted small"><span id="job-elapsed"></span><span id="job-remaining"></span>
-          <label class="check small pause-opt"><input type="checkbox" id="opt-pause-spindle"> Couper la broche en pause <button type="button" class="ibtn" data-info="pauseSpindle" aria-label="Plus d'informations" aria-expanded="false">i</button></label></div>
+          <label class="check small pause-opt"><input type="checkbox" id="opt-pause-spindle"> <span id="pause-spindle-label">Couper la broche en pause</span> <button type="button" class="ibtn" data-info="pauseSpindle" aria-label="Plus d'informations" aria-expanded="false">i</button></label></div>
         <div class="job-actions">
           <button type="button" class="ibtn" data-info="job" aria-label="Plus d'informations" aria-expanded="false">i</button>
-          <label class="ghost file-btn">Ouvrir<input id="file-input" type="file" accept=".nc,.gcode,.ngc,.tap,.gc,.cnc,.txt" hidden></label>
+          <label class="ghost file-btn">Ouvrir<input id="file-input" type="file" accept=".nc,.gcode,.ngc,.tap,.gc,.cnc,.txt,.svg,.png,.jpg,.jpeg,.webp,.bmp" hidden></label>
           <button id="btn-run" class="primary">Démarrer</button>
           <button id="btn-pause" class="warn">Pause</button>
           <button id="btn-spindle" class="ghost" hidden title="Arrêter la broche pendant la pause">⏻ Couper la broche</button>
@@ -169,8 +177,13 @@
 
     <!-- Colonne droite : onglets -->
     <section class="panel right">
-      <nav class="tabs" role="tablist">
+      <div class="workspace-heading">
+        <h1 id="workspace-title">Pilotage CNC</h1>
+        <p id="workspace-description" class="muted small">Console, reprise et palpage pour préparer votre usinage.</p>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="Outils de l'espace de travail">
         <button data-tab="console" class="active">Console</button>
+        <button data-tab="laser">Laser</button>
         <button data-tab="resume">Reprise</button>
         <button data-tab="probe">Palpage</button>
         <button data-tab="zones">Zone</button>
@@ -181,6 +194,7 @@
       <div class="tab" data-pane="console">
         <div id="console" class="console"></div>
         <form id="console-form" class="row gap">
+          <label class="sr-only" for="console-input">Commande G-code</label>
           <input id="console-input" autocomplete="off" spellcheck="false" placeholder="G-code ou commande $ (↑ historique)">
           <button class="primary">Envoyer</button>
         </form>
@@ -196,12 +210,79 @@
         </div>
       </div>
 
+      <div class="tab" data-pane="laser" hidden>
+        <h2>Gravure laser</h2>
+        <p class="muted small">Importez une image ou un SVG pour créer un parcours raster, ou chargez le G-code exporté par LightBurn. L’origine X0/Y0 est le coin inférieur gauche du visuel.</p>
+        <label class="check laser-mode">
+          <input id="laser-mode" type="checkbox">
+          Activer le mode laser pour le programme courant
+        </label>
+        <div class="laser-safety" role="note">
+          <b>Avant tout démarrage</b>
+          <span>Enceinte fermée, lunettes adaptées à la longueur d’onde, extraction des fumées et surveillance permanente. Gardez l’arrêt d’urgence accessible.</span>
+          <span>Copeau n’active pas automatiquement le laser : vérifiez la machine et la pièce avant chaque gravure.</span>
+        </div>
+        <label class="field">Image ou SVG
+          <input id="laser-file" type="file" accept=".svg,.png,.jpg,.jpeg,.webp,.bmp,image/*">
+        </label>
+        <section class="laser-block" aria-labelledby="laser-machine-title">
+          <div class="section-title"><span id="laser-machine-title">Profil machine</span></div>
+          <div class="laser-picker">
+            <select id="laser-machine" aria-label="Profil machine"></select>
+            <button id="laser-machine-new" type="button" class="ghost small">Nouveau</button>
+            <button id="laser-machine-delete" type="button" class="ghost small">Supprimer</button>
+          </div>
+          <div class="laser-fields">
+            <label class="field laser-wide">Nom<input id="laser-machine-name" type="text" maxlength="60"></label>
+            <label class="field">Plateau X <span class="muted">mm</span><input id="laser-bed-width" type="number" min="10" max="3000" step="1"></label>
+            <label class="field">Plateau Y <span class="muted">mm</span><input id="laser-bed-height" type="number" min="10" max="3000" step="1"></label>
+            <label class="field">S max <span class="muted">= $30</span><input id="laser-smax" type="number" min="1" max="100000" step="1"></label>
+            <button id="laser-machine-save" type="button" class="ghost small laser-save-btn">Enregistrer le profil</button>
+          </div>
+          <p id="laser-machine-note" class="muted small" aria-live="polite"></p>
+        </section>
+        <section class="laser-block" aria-labelledby="laser-preset-title">
+          <div class="section-title"><span id="laser-preset-title">Préréglages de gravure</span></div>
+          <div class="laser-picker">
+            <select id="laser-preset" aria-label="Préréglage de gravure"></select>
+            <button id="laser-preset-delete" type="button" class="ghost small">Supprimer</button>
+          </div>
+          <div class="laser-picker">
+            <input id="laser-preset-name" type="text" maxlength="60" placeholder="Nom, ex. Contreplaqué 3 mm" aria-label="Nom du préréglage">
+            <button id="laser-preset-save" type="button" class="ghost small">Enregistrer</button>
+            <button id="laser-preset-new" type="button" class="ghost small">Nouveau</button>
+          </div>
+          <p class="muted small">Un préréglage mémorise la résolution, l’avance, la puissance, la marge, l’inversion et les calques. Testez chaque matériau sur une chute avant de l’enregistrer.</p>
+        </section>
+        <div class="laser-fields">
+          <label class="field">Largeur <span class="muted">mm</span><input id="laser-width" type="number" min="1" max="3000" step="1" value="50"></label>
+          <label class="field">Résolution <span class="muted">px/mm</span><input id="laser-resolution" type="number" min="1" max="20" step="1" value="4"></label>
+          <label class="field">Avance <span class="muted">mm/min</span><input id="laser-feed" type="number" min="1" max="30000" step="50" value="1000"></label>
+          <label class="field">Puissance max <span class="muted">S · ≤ $30</span><input id="laser-power" type="number" min="1" step="1" value="1000"></label>
+          <label class="field">Marge raster <span class="muted">% de l’avance</span><input id="laser-overscan" type="number" min="0" max="20" step="0.5" value="0"></label>
+        </div>
+        <p class="muted small">La marge ajoute une course laser éteint avant et après chaque ligne. LightBurn recommande au moins 5 % pour le raster ; laissez 0 si la tête n’a pas d’espace libre autour de l’image.</p>
+        <label class="check small"><input id="laser-invert" type="checkbox"> Inverser les tons (blanc gravé, noir éteint)</label>
+        <label class="check small"><input id="laser-use-layers" type="checkbox"> Graver par calques couleur 00 à 07</label>
+        <div id="laser-layers" class="laser-layers" hidden>
+          <table>
+            <thead><tr><th scope="col">Calque</th><th scope="col">Actif</th><th scope="col">Avance</th><th scope="col">S</th><th scope="col">Passes</th></tr></thead>
+            <tbody id="laser-layer-rows"></tbody>
+          </table>
+          <p class="muted small">Chaque pixel prend la couleur de calque la plus proche ; le blanc n’est jamais gravé. Les calques actifs sont gravés dans l’ordre 00 → 07, à puissance constante. En mode calques, l’avance, la puissance et l’inversion ci-dessus sont ignorées.</p>
+        </div>
+        <button id="laser-generate" class="primary block" disabled>Générer et charger le parcours</button>
+        <button id="laser-save" class="ghost block" hidden>Télécharger le G-code généré</button>
+        <p id="laser-status" class="muted small" aria-live="polite">Choisissez une image pour préparer un parcours.</p>
+        <p class="muted small">Pour un G-code LightBurn : activez le mode laser avant l’import. Copeau exige M4, $13=0, $32=1 et aucun mouvement Z ni changement de repère.</p>
+      </div>
+
       <div class="tab" data-pane="resume" hidden>
         <p class="muted">Reprendre un usinage interrompu à partir d'une ligne. Copeau restaure les modes, démarre la broche, remonte au Z de sécurité, se place au-dessus du point puis plonge doucement.</p>
         <label class="field"><span>Ligne de reprise <button type="button" class="ibtn" data-info="resume" aria-label="Plus d'informations" aria-expanded="false">i</button></span>
           <input id="resume-line" type="number" min="1" value="1">
         </label>
-        <input id="resume-slider" type="range" min="1" value="1">
+        <input id="resume-slider" type="range" min="1" value="1" aria-label="Ligne de reprise dans le programme">
         <pre id="resume-context" class="code-context"></pre>
         <label class="field inline">Attente broche <input id="resume-spinup" type="number" min="0" value="3"><span class="muted">s</span> <button type="button" class="ibtn" data-info="spinup" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
         <pre id="resume-preamble" class="code-context muted"></pre>
@@ -270,23 +351,25 @@
         <div id="macro-list" class="macro-list"></div>
         <details class="macro-edit">
           <summary>Nouvelle macro / modifier</summary>
+          <label class="sr-only" for="macro-name">Nom de la macro</label>
           <input id="macro-name" placeholder="Nom">
+          <label class="sr-only" for="macro-gcode">Commandes G-code de la macro</label>
           <textarea id="macro-gcode" rows="6" spellcheck="false" placeholder="G-code, une ligne par commande"></textarea>
           <div class="row gap"><button id="btn-macro-save" class="primary grow">Enregistrer</button><button id="btn-macro-new" class="ghost">Vider</button></div>
         </details>
       </div>
 
       <div class="tab" data-pane="settings" hidden>
-        <div class="row gap"><input id="settings-filter" class="grow" placeholder="Filtrer les réglages…"><button type="button" class="ibtn" data-info="settings" aria-label="Plus d'informations" aria-expanded="false">i</button></div>
+        <div class="row gap"><label class="sr-only" for="settings-filter">Filtrer les réglages Grbl</label><input id="settings-filter" class="grow" placeholder="Filtrer les réglages…"><button type="button" class="ibtn" data-info="settings" aria-label="Plus d'informations" aria-expanded="false">i</button></div>
         <div id="settings-list" class="settings-list"><p class="muted">Connectez une machine pour lire ses réglages ($$).</p></div>
       </div>
     </section>
   </main>
 
-  <div id="toolchange" class="modal" hidden>
+  <div id="toolchange" class="modal" role="dialog" aria-modal="true" aria-labelledby="toolchange-title" aria-describedby="toolchange-description" hidden>
     <div class="modal-card">
-      <h2>Changement d'outil</h2>
-      <p>Le programme demande l'outil <b id="tool-number"></b>. La broche est à l'arrêt seulement si votre programme l'a coupée : vérifiez avant de toucher l'outil.</p>
+      <h2 id="toolchange-title" tabindex="-1">Changement d'outil</h2>
+      <p id="toolchange-description">Le programme demande l'outil <b id="tool-number"></b>. La broche est à l'arrêt seulement si votre programme l'a coupée : vérifiez avant de toucher l'outil.</p>
       <ol class="muted">
         <li>Remontez Z et changez l'outil (le jog fonctionne).</li>
         <li>Refaites le zéro Z (onglet Palpage &gt; Z).</li>

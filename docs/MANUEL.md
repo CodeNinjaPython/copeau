@@ -15,6 +15,7 @@ Copeau pilote une fraiseuse CNC équipée d'une carte **Grbl 1.1** ou **grblHAL*
 7. [Palpage automatique](#7-palpage-automatique)
 8. [Plateau et zone de travail](#8-plateau-et-zone-de-travail)
 9. [Charger et vérifier un programme](#9-charger-et-vérifier-un-programme)
+   - [Gravure laser](#gravure-laser)
 10. [Lancer, mettre en pause, arrêter](#10-lancer-mettre-en-pause-arrêter)
 11. [Changement d'outil](#11-changement-doutil)
 12. [Reprendre un usinage interrompu](#12-reprendre-un-usinage-interrompu)
@@ -27,6 +28,17 @@ Copeau pilote une fraiseuse CNC équipée d'une carte **Grbl 1.1** ou **grblHAL*
 ---
 
 ## 1. Installation et lancement
+
+### Application Linux
+
+Sur Linux **x86_64** avec glibc, téléchargez la version souhaitée depuis les [releases GitHub](https://github.com/CodeNinjaPython/copeau/releases). Node.js n'est pas nécessaire :
+
+- **Debian, Ubuntu et dérivés** : téléchargez le paquet `.deb` et `install-linux.sh` dans le même dossier, puis lancez `sh install-linux.sh ./Copeau-0.1.0-amd64.deb` en adaptant le nom à la version téléchargée. Lancez ensuite Copeau depuis le menu des applications.
+- **AppImage** : rendez le fichier téléchargé exécutable avec `chmod +x Copeau-0.1.0-x86_64.AppImage`, puis lancez-le avec `./Copeau-0.1.0-x86_64.AppImage` en adaptant le nom à la version téléchargée. Il faut un environnement graphique, FUSE et `udevadm` pour détecter les ports série.
+
+Les macros et réglages de l'application de bureau sont conservés dans le profil utilisateur Linux (`$XDG_CONFIG_HOME`, ou `~/.config` par défaut).
+
+### Lancement depuis les sources
 
 **Prérequis :** un ordinateur (macOS, Windows ou Linux) avec [Node.js](https://nodejs.org) version 20 ou plus récente.
 
@@ -66,10 +78,15 @@ Dans la liste des ports, **Simulateur Grbl (sans machine)** remplace une vraie c
 
 | Zone | Contenu |
 |---|---|
+| **Espaces de travail** | Onglets supérieurs **CNC**, **Laser** et **Configuration**, avec mémorisation du dernier panneau utilisé dans chacun |
 | **Barre du haut** | Choix du port, connexion, état de la machine, boutons Déverrouiller, Origine, Reset, aide **?** |
 | **Colonne de gauche** | Position de l'outil, zéros, déplacements (jog), corrections en direct |
 | **Centre** | Vue 3D du parcours d'outil, barre du programme (ouvrir, démarrer, pause, arrêter, progression) |
-| **Colonne de droite** | Onglets Console, Reprise, Palpage, Zone, Macros, Réglages |
+| **Colonne de droite** | Outils de l'espace choisi : Console / Reprise / Palpage pour CNC ; Laser / Console / Zone pour Laser ; Réglages / Zone / Macros / Console pour Configuration |
+
+L'espace **Configuration** masque les déplacements à gauche et désactive leurs raccourcis clavier pour donner plus de place au plateau et aux réglages. Le programme chargé, la connexion et les valeurs saisies sont conservés lors des changements d'espace. Les flèches gauche/droite, Début et Fin permettent de choisir un onglet lorsqu'il a le focus ; les touches de déplacement ne pilotent pas la machine depuis un onglet.
+
+**Changer d'espace n'est pas changer de mode machine.** Aucun ordre n'est envoyé à la carte. Le libellé « Programme : CNC » ou « Programme : Laser » en haut reste visible dans tous les espaces. Pour activer les protections laser, cochez explicitement **Activer le mode laser** dans le panneau de gravure ; elles restent actives même si vous ouvrez Configuration ou CNC.
 
 Sur tablette ou téléphone, les colonnes s'empilent : la vue 3D en haut, puis les commandes.
 
@@ -90,7 +107,7 @@ Les petits boutons **i** ouvrent une bulle d'explication à côté d'un réglage
 
 1. Branchez la carte en USB et allumez l'alimentation de la machine.
 2. Cliquez sur **↻** pour rafraîchir la liste des ports.
-3. Choisissez le port (sur Mac il ressemble à `/dev/cu.usbserial-…` ou `/dev/cu.usbmodem…`, sur Windows à `COM3`).
+3. Choisissez le port (sur Mac il ressemble à `/dev/cu.usbserial-…` ou `/dev/cu.usbmodem…`, sur Windows à `COM3`, sur Linux à `/dev/ttyUSB0` ou `/dev/ttyACM0`).
 4. Laissez la vitesse à **115200** (valeur standard de Grbl), sauf si votre carte est réglée autrement.
 5. Cliquez sur **Connecter**.
 
@@ -275,7 +292,7 @@ Les formes sont mémorisées en **coordonnées machine** : elles restent au mêm
 
 ## 9. Charger et vérifier un programme
 
-Formats acceptés : `.nc`, `.gcode`, `.ngc`, `.tap`, `.gc`, `.cnc`, `.txt` (G-code texte, 60 Mo maximum).
+Formats acceptés : `.nc`, `.gcode`, `.ngc`, `.tap`, `.gc`, `.cnc`, `.txt` (G-code texte, 60 Mo maximum). Les images et SVG se préparent dans l’onglet **Laser**.
 
 - Cliquez sur **Ouvrir**, ou **glissez le fichier** sur la vue 3D.
 
@@ -304,6 +321,27 @@ La barre du programme affiche le nombre de lignes, la **durée estimée**, les d
 Sous le curseur s'affichent le temps simulé, la durée totale et la ligne de G-code en cours. La simulation se ferme d'elle-même si un nouveau programme est chargé ou si l'usinage réel démarre.
 
 > La simulation suppose une fraise droite et un dessus de pièce à Z0. Elle sert à vérifier les trajets, les profondeurs et l'ordre des opérations. Elle ne reproduit ni les accélérations de la machine ni les efforts de coupe : la durée réelle sera un peu plus longue.
+
+### Gravure laser
+
+L’onglet **Laser** convertit une image ou un SVG en parcours raster et peut charger le G-code exporté par LightBurn. Copeau n’intègre pas LightBurn et ne remplace pas son éditeur vectoriel : les images importées sont gravées en niveaux de gris, ou par calques couleur.
+
+1. Importez un SVG, PNG, JPEG, WebP ou BMP. Le coin inférieur gauche du visuel correspond à X0/Y0. Les références externes et éléments actifs dans un SVG sont refusés.
+2. Réglez la largeur, la résolution, l’avance et la puissance maximale `S`. La puissance maximale doit être au plus égale au réglage `$30` de la carte. Les zones transparentes sont traitées comme du blanc. La marge raster est désactivée par défaut ; à 5 %, Copeau ajoute une course laser éteint égale à 5 % de l’avance (convertie en mm) avant et après chaque ligne. Elle dépasse les bords de l’image : n’en mettez que si la machine a assez de course libre.
+3. Cliquez **Générer et charger le parcours**, puis vérifiez la vue et lancez **Simuler**. Le parcours coloré indique la puissance demandée ; cette simulation ne valide ni la puissance optique réelle ni le résultat sur le matériau.
+4. Pour un fichier LightBurn, activez **Mode laser** avant de l’importer, ou avant de le démarrer. Exportez en mode de puissance dynamique **M4**.
+
+#### Profils machine, préréglages et calques
+
+- **Profil machine** : choisissez **Emblaser 2** (plateau 500 × 300 mm) ou **Graveuse GRBL générique**, ou créez le vôtre avec **Nouveau**. Le profil fixe le plateau et la puissance **S max**. Réglez S max sur la valeur `$30` de votre contrôleur ; Copeau signale tout écart dès que la machine est connectée. La valeur S max fournie par défaut (1000) est un point de départ, pas une valeur garantie pour votre machine. La génération est refusée si la puissance dépasse S max ou si l’image, marge comprise, dépasse le plateau.
+- **Préréglages de gravure** : ils sont numérotés 1, 2, 3… et mémorisent la résolution, l’avance, la puissance, la marge, l’inversion et les calques. Saisissez un nom puis **Enregistrer** (remplace le préréglage sélectionné) ou **Nouveau** (en ajoute un). Choisir un préréglage dans la liste l’applique aussitôt. Aucun préréglage matériau n’est fourni : établissez vos valeurs sur une chute.
+- **Calques couleur 00 à 07** : cochez **Graver par calques couleur** pour graver comme les calques de LightBurn (00 noir, 01 bleu, 02 rouge, 03 vert, 04 jaune, 05 orange, 06 cyan, 07 magenta). Chaque pixel prend la couleur de calque la plus proche ; le blanc n’est jamais gravé. Chaque calque actif a son avance, sa puissance `S` constante et 1 à 10 passes, et les calques sont gravés dans l’ordre 00 → 07. Les pixels d’un calque désactivé ne sont pas gravés.
+
+Les profils et préréglages sont enregistrés dans les données de l’application et sont conservés lors des mises à jour.
+
+Avant le démarrage, Copeau exige `$13=0` (positions rapportées en millimètres), `$32=1`, un `$30` lisible, une puissance `S` positive ne dépassant pas `$30`, et refuse `M3`, les déplacements Z, les changements d’outil et les mouvements qui modifient ou contournent le repère (`G10`, `G28`, `G30`, `G53`, `G92`). Dans LightBurn, réglez **S-Value Max** sur la même valeur que `$30`. Copeau ajoute `M5` au début et à la fin et coupe la sortie avant les déplacements rapides. `$13` et `$32` ne sont jamais modifiés automatiquement. En mode laser, le jog Z, l’origine globale, le palpage et la reprise à une ligne sont désactivés ; une pause coupe la sortie laser avant de pouvoir reprendre.
+
+**Sécurité :** utilisez une enceinte adaptée, des lunettes certifiées pour la longueur d’onde du laser, une extraction des fumées et une surveillance permanente. Gardez l’arrêt d’urgence physique accessible. Le logiciel seul ne peut pas protéger contre un départ de feu ou une exposition au faisceau. L’Emblaser 2 et les autres contrôleurs doivent être vérifiés individuellement : la compatibilité n’est pas garantie par le seul nom de la machine.
 
 ### Placer le programme sur le plateau
 
@@ -453,7 +491,8 @@ Tous les écrans ouverts voient et commandent **la même machine** en temps rée
 
 | Problème | Solution |
 |---|---|
-| Le port n'apparaît pas | Cliquez **↻**. Vérifiez le câble (certains ne transmettent que l'alimentation). Sous Windows, installez le pilote CH340 si la carte en utilise un. |
+| Le port n'apparaît pas | Cliquez **↻**. Vérifiez le câble (certains ne transmettent que l'alimentation). Sous Windows, installez le pilote CH340 si la carte en utilise un. Sous Linux, vérifiez que `udevadm` est installé. |
+| Accès refusé au port sous Linux | Vérifiez les droits sur `/dev/ttyUSB0` ou `/dev/ttyACM0`. Sur Debian et Ubuntu, ajoutez si nécessaire votre utilisateur au groupe `dialout` avec `sudo usermod -aG dialout "$USER"`, puis déconnectez-vous et reconnectez-vous. Sur une autre distribution, vérifiez le groupe propriétaire avec `ls -l` sur le port. |
 | « Connexion… » sans fin | Mauvaise vitesse (essayez 115200 puis 250000), ou un autre logiciel (UGS, Candle, CNCjs) occupe déjà le port. |
 | Les flèches ne font rien | La machine doit être **Prêt** : faites l'origine ou déverrouillez. Cliquez dans la vue 3D si le curseur est dans un champ de saisie. |
 | Le jog s'arrête avant la fin | Limites logicielles atteintes (`$20=1`) : c'est voulu. Vérifiez que la course (`$130` à `$132`) correspond à la machine. |

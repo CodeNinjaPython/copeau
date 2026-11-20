@@ -1,0 +1,94 @@
+name: Linux
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Vérifier la version du tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Le tag $GITHUB_REF_NAME ne correspond pas à la version $version de package.json."
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:linux
+      - name: Vérifier les paquets
+        shell: bash
+        run: |
+          set -euo pipefail
+          dpkg-deb --extract dist/*.deb "$RUNNER_TEMP/copeau-deb"
+          app="$RUNNER_TEMP/copeau-deb/opt/Copeau"
+          ELECTRON_RUN_AS_NODE=1 COPEAU_PACKAGED_RESOURCES="$app/resources" \
+            "$app/copeau" --test test/linux-package.test.js
+
+          appimage=(dist/*.AppImage)
+          mkdir -p "$RUNNER_TEMP/copeau-appimage"
+          cd "$RUNNER_TEMP/copeau-appimage"
+          "$GITHUB_WORKSPACE/${appimage[0]}" --appimage-extract >/dev/null
+          app="$PWD/squashfs-root"
+          ELECTRON_RUN_AS_NODE=1 COPEAU_PACKAGED_RESOURCES="$app/resources" \
+            "$app/copeau" --test "$GITHUB_WORKSPACE/test/linux-package.test.js"
+      - name: Préparer les fichiers
+        run: |
+          cp install-linux.sh dist/install-linux.sh
+          cd dist
+          sha256sum ./*.AppImage ./*.deb ./install-linux.sh > SHA256SUMS-linux-x64.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Copeau-Linux-x64
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/install-linux.sh
+            dist/SHA256SUMS-linux-x64.txt
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Copeau-Linux-x64
+          path: release
+      - name: Publier la release GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release
+          assets=(./*.AppImage ./*.deb ./install-linux.sh ./SHA256SUMS-linux-x64.txt)
+          tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name')"
+          if printf '%s\n' "$tags" | grep -Fxq -- "$GITHUB_REF_NAME"; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            options=()
+            if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+              options+=(--prerelease)
+            fi
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag \
+              --generate-notes --repo "$GITHUB_REPOSITORY" "${options[@]}"
+          fi

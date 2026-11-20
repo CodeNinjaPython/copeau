@@ -2,7 +2,12 @@ import { Viewer, outline } from './viewer.js';
 import { startTour } from './tour.js';
 import { Preview } from './preview.js';
 import { ibtn, initInfo } from './info.js';
-import { splitProgram, analyze, buildResume } from './shared/gcode.js';
+import { splitProgram, analyze, buildResume, tokenize } from './shared/gcode.js';
+import { isLaserImage, normalizeLaserText, rasterizeImage, validateLaserProgram } from './laser.js';
+import { WORKSPACES, workspaceForTab, workspaceTab } from './workspaces.js';
+import {
+  DEFAULT_MACHINES, LAYER_COLORS, bedLimitError, defaultLayers, powerLimitErrors, sanitizeLayers, sanitizeMachine, sanitizePreset,
+} from './laser-profiles.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -19,7 +24,9 @@ const S = {
   settings: {},
   macros: [],
   zones: { table: null, zone: null },
+  laserMode: store.get('laserMode', false),
 };
+let pauseSpindlePreference = store.get('pauseSpindle', false);
 
 // ---- WebSocket ------------------------------------------------------------
 
@@ -50,7 +57,13 @@ function request(t, payload = {}) {
 
 // Requête dont l'erreur s'affiche en toast.
 const act = (t, payload) => request(t, payload).catch((e) => { toast(e.message, 'err'); throw e; });
-const cmd = (line) => act('cmd', { line }).catch(() => {});
+const cmd = (line) => {
+  if (S.laserMode && tokenize(line).some(({ letter, value }) => letter === 'Z' || (letter === 'M' && [3, 4, 6].includes(value)))) {
+    toast('En mode laser, les commandes manuelles Z, M3, M4 et M6 sont bloquées.', 'err');
+    return Promise.resolve();
+  }
+  return act('cmd', { line }).catch(() => {});
+};
 const rt = (name) => act('realtime', { name }).catch(() => {});
 
 function onMessage(m) {
@@ -65,11 +78,15 @@ function onMessage(m) {
     case 'state': S.machine = m.s; return renderMachine();
     case 'job': S.job = m.j; return renderJob();
     case 'job-text': return onJobText(m.name, m.text);
-    case 'settings': S.settings = m.s; return renderSettings();
+    case 'settings': S.settings = m.s; updateMachineNote(); return renderSettings();
     case 'logs': $('#console').innerHTML = ''; m.list.forEach(addLog); return;
     case 'log': return addLog(m.entry);
     case 'macros': S.macros = m.list; return renderMacros();
-    case 'config': S.zones = { table: null, zone: null, ...(m.config.zones || {}) }; resetDrafts(); return renderZones();
+    case 'config':
+      S.zones = { table: null, zone: null, ...(m.config.zones || {}) };
+      applyLaserConfig(m.config.laser);
+      resetDrafts();
+      return renderZones();
   }
 }
 
@@ -126,7 +143,7 @@ const STATE_LABEL = {
 
 function setBadge(text, cls) {
   const b = $('#state-badge');
-  b.textContent = text;
+  if (b.textContent !== text) b.textContent = text;
   b.className = `badge ${cls || ''}`;
 }
 
@@ -151,6 +168,10 @@ buildDro();
 // Pose l'origine travail : la position actuelle de l'axe devient `value`.
 // G10 L20 P0 écrit dans le repère actif (G54…), conservé par Grbl à l'arrêt.
 function setWork(axes) {
+  if (S.laserMode && 'Z' in axes) {
+    toast('Le réglage de Z est désactivé en mode laser.', 'err');
+    return Promise.resolve();
+  }
   const words = Object.entries(axes).map(([a, v]) => `${a}${v}`).join('');
   const label = Object.entries(axes).map(([a, v]) => `${a} = ${v}`).join(', ');
   return act('cmd', { line: `G10L20P0${words}` })
@@ -219,7 +240,10 @@ function renderMachine() {
   const alarm = m.ready && state === 'Alarm';
   const bar = $('#alarm-bar');
   bar.hidden = !alarm;
-  if (alarm) bar.textContent = `${bar.dataset.text || 'Machine en alarme'}. Faites l'origine ($H) ou déverrouillez ($X) si la position est sûre.`;
+  if (alarm) {
+    const message = `${bar.dataset.text || 'Machine en alarme'}. Faites l'origine ($H) ou déverrouillez ($X) si la position est sûre.`;
+    if (bar.textContent !== message) bar.textContent = message;
+  }
 
   viewer.setWorkOffset(s.wco);
   viewer.setTool(s.wpos);
@@ -233,22 +257,29 @@ function updateEnabled() {
   const m = S.machine;
   const state = m.status.state;
   const idle = m.ready && state === 'Idle';
-  const jobActive = ['running', 'paused', 'spinup', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
+  const jobActive = hasActiveJob();
   const canJog = m.ready && (state === 'Idle' || state === 'Jog') && !(jobActive && S.job.state !== 'toolchange');
-  $$('[data-jog], #jog-stop').forEach((b) => (b.disabled = !canJog));
+  $$('[data-jog], #jog-stop').forEach((b) => {
+    const hasZ = b.dataset.jog?.split(/\s+/).some((axis) => axis.startsWith('Z'));
+    b.disabled = !canJog || (S.laserMode && hasZ);
+  });
   // Zéros grisés tant qu'un jog se termine : un zéro posé en plein arrêt
   // tomberait à côté de la position finale.
   const settled = idle && !jogSettling;
-  $$('[data-zero], [data-edit], [data-axis-home], #btn-goto-zero, #btn-goto-origin').forEach((b) => (b.disabled = !settled || (jobActive && S.job.state !== 'toolchange')));
+  $$('[data-zero], [data-edit], [data-axis-home], #btn-goto-zero, #btn-goto-origin').forEach((b) => {
+    const zOnly = b.dataset.zero === 'XYZ' || b.dataset.zero === 'Z' || b.dataset.edit === 'Z'
+      || b.dataset.axisHome === 'Z' || b.id === 'btn-goto-origin';
+    b.disabled = !settled || (jobActive && S.job.state !== 'toolchange') || (S.laserMode && zOnly);
+  });
   $('#btn-unlock').disabled = !m.ready;
-  $('#btn-home').disabled = !m.ready || jobActive;
+  $('#btn-home').disabled = !m.ready || jobActive || S.laserMode;
   $('#btn-reset').disabled = !m.connected;
   $$('[data-rt]').forEach((b) => (b.disabled = !m.ready));
 
   const j = S.job;
   const canRun = idle && j && !jobActive && S.lines.length;
   $('#btn-run').disabled = !canRun;
-  $('#btn-resume-run').disabled = !canRun;
+  $('#btn-resume-run').disabled = !canRun || S.laserMode;
   const machineHeld = state === 'Hold' || state === 'Door'; // M0 ou porte de sécurité
   const pauseBtn = $('#btn-pause');
   pauseBtn.disabled = !(j && (j.state === 'running' || j.state === 'paused'));
@@ -259,11 +290,16 @@ function updateEnabled() {
   const spBtn = $('#btn-spindle');
   spBtn.hidden = !inPause && j?.state !== 'spinup';
   spBtn.classList.toggle('held', !!m.spindleHeld);
-  spBtn.textContent = m.spindleHeld ? '⏻ Broche coupée' : '⏻ Couper la broche';
-  spBtn.title = m.spindleHeld ? 'La broche se rallumera à la reprise' : 'Arrêter la broche pendant la pause';
+  spBtn.textContent = m.spindleHeld ? (S.laserMode ? '⏻ Laser coupé' : '⏻ Broche coupée') : (S.laserMode ? '⏻ Couper le laser' : '⏻ Couper la broche');
+  spBtn.title = m.spindleHeld ? 'La sortie se réactivera à la reprise' : 'Arrêter la sortie pendant la pause';
   spBtn.disabled = !!m.spindleHeld || !inPause || !(state === 'Hold' && m.status.subState === '0');
   $('#btn-stop').disabled = !jobActive || j.state === 'stopping';
-  $('#btn-probe').disabled = !idle || (jobActive && j.state !== 'toolchange');
+  $('#btn-probe').disabled = !idle || (jobActive && j.state !== 'toolchange') || S.laserMode;
+  $('#btn-tool-probe').disabled = S.laserMode;
+  $$('[data-macro-run]').forEach((b) => (b.disabled = S.laserMode));
+  $('#laser-mode').disabled = jobActive || state === 'Jog';
+  $('#laser-file').disabled = jobActive || state === 'Jog' || laserBusy;
+  $('#laser-generate').disabled = !laserSource || laserBusy || jobActive || state === 'Jog';
   $('#btn-place').disabled = !canRun && !$('#btn-place').classList.contains('active');
   $('#btn-preview').disabled = !S.lines.length || (jobActive && !preview?.active);
   const zoneOutline = $('.zone-card[data-target="zone"] [data-outline]');
@@ -427,8 +463,10 @@ document.addEventListener('keydown', (e) => {
     preview.playing ? preview.pause() : preview.play();
     return;
   }
-  if (!KEYS[e.key] || typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!KEYS[e.key] || typing(e) || e.metaKey || e.ctrlKey || e.altKey ||
+    e.target.closest('[role="tab"]') || document.body.dataset.workspace === 'configuration') return;
   e.preventDefault();
+  if (S.laserMode && 'Z' in KEYS[e.key]) { toastOnce('Les déplacements Z sont désactivés en mode laser.'); return; }
   if (e.target.tagName === 'SELECT') e.target.blur();
   if (e.repeat || heldKeys[e.code]) return;
   if ($('#jog-stop').disabled) { toastOnce(jogBlockedReason()); return; }
@@ -474,7 +512,7 @@ function onJobText(name, text) {
   $('#job-name').textContent = name;
   $('#job-meta').textContent = [`${i.lines} lignes`, `≈ ${fmtDuration(i.seconds)}`, dims,
     i.toolChanges ? `${i.toolChanges} changement(s) d'outil` : ''].filter(Boolean).join(' · ');
-  if (Number.isFinite(i.min.Z) && i.min.Z >= 0) toast('Attention : aucune passe sous Z0. Le zéro Z est-il au bon endroit ?', 'err');
+  if (!S.laserMode && Number.isFinite(i.min.Z) && i.min.Z >= 0) toast('Attention : aucune passe sous Z0. Le zéro Z est-il au bon endroit ?', 'err');
   closePreview();
   setupResume();
   renderZones();
@@ -485,10 +523,334 @@ function onJobText(name, text) {
 
 async function loadFile(file) {
   if (!file) return;
+  if (hasActiveJob()) return toast('Arrêtez le programme avant d’en charger un autre.', 'err');
   if (file.size > 60 * 1024 * 1024) return toast('Fichier trop gros (60 Mo max)', 'err');
-  const text = await file.text();
+  if (isLaserImage(file)) {
+    showTab('laser');
+    $('#laser-file').value = '';
+    return generateLaserFile(file);
+  }
+  let text = await file.text();
+  if (S.laserMode) text = normalizeLaserText(text).join('\n');
   await act('load', { name: file.name, text }).then(() => toast(`${file.name} chargé`, 'ok')).catch(() => {});
 }
+
+function setLaserMode(enabled, { reveal = true } = {}) {
+  if ((hasActiveJob() || S.machine.status.state === 'Jog') && enabled !== S.laserMode) {
+    $('#laser-mode').checked = S.laserMode;
+    toast('Arrêtez le programme ou le jog avant de changer de mode.', 'err');
+    return false;
+  }
+  S.laserMode = enabled;
+  store.set('laserMode', enabled);
+  $('#laser-mode').checked = enabled;
+  $('#program-mode').textContent = enabled ? 'Programme : Laser' : 'Programme : CNC';
+  $('#program-mode').classList.toggle('laser', enabled);
+  $('#opt-pause-spindle').checked = enabled || pauseSpindlePreference;
+  $('#opt-pause-spindle').disabled = enabled;
+  $('#pause-spindle-label').textContent = enabled ? 'Couper le laser à la pause (obligatoire)' : 'Couper la broche en pause';
+  viewer.setLaserMode(enabled);
+  if (enabled && reveal) showTab('laser');
+  updateEnabled();
+  return true;
+}
+
+$('#laser-mode').onchange = (e) => setLaserMode(e.target.checked);
+$('#laser-file').onchange = (e) => {
+  laserSource = e.target.files[0] || null;
+  lastLaserProgram = null;
+  lastLaserName = '';
+  $('#laser-save').hidden = true;
+  updateEnabled();
+};
+let laserSource = null;
+let laserBusy = false;
+let lastLaserProgram = null;
+let lastLaserName = '';
+
+const sanitizeList = (items, sanitize) => {
+  const result = [];
+  for (const item of Array.isArray(items) ? items : []) {
+    try { result.push(sanitize(item)); } catch {}
+  }
+  return result;
+};
+let laserMachines = DEFAULT_MACHINES.map((m) => ({ ...m }));
+let laserMachineId = laserMachines[0].id;
+let laserPresets = [];
+let laserLayers = defaultLayers();
+
+function applyLaserConfig(saved) {
+  if (!saved || typeof saved !== 'object') return;
+  const machines = sanitizeList(saved.machines, sanitizeMachine);
+  laserMachines = machines.length ? machines : DEFAULT_MACHINES.map((m) => ({ ...m }));
+  laserMachineId = laserMachines.some((m) => m.id === saved.machineId) ? saved.machineId : laserMachines[0].id;
+  laserPresets = sanitizeList(saved.presets, sanitizePreset);
+  try { laserLayers = sanitizeLayers(saved.layers); } catch { laserLayers = defaultLayers(); }
+  $('#laser-use-layers').checked = Boolean(saved.useLayers);
+  renderMachines();
+  renderLayers();
+  renderPresets();
+}
+
+function saveLaserConfig() {
+  return act('setConfig', {
+    key: 'laser',
+    value: {
+      machines: laserMachines,
+      machineId: laserMachineId,
+      presets: laserPresets,
+      layers: laserLayers,
+      useLayers: $('#laser-use-layers').checked,
+    },
+  }).catch(() => {});
+}
+
+const currentMachine = () => laserMachines.find((m) => m.id === laserMachineId) || laserMachines[0];
+
+function renderMachines() {
+  const machine = currentMachine();
+  laserMachineId = machine.id;
+  const select = $('#laser-machine');
+  select.replaceChildren(...laserMachines.map((m) => new Option(m.name, m.id, false, m.id === machine.id)));
+  $('#laser-machine-name').value = machine.name;
+  $('#laser-bed-width').value = machine.bedWidth;
+  $('#laser-bed-height').value = machine.bedHeight;
+  $('#laser-smax').value = machine.sMax;
+  $('#laser-width').max = machine.bedWidth;
+  $('#laser-power').max = machine.sMax;
+  $('#laser-machine-delete').disabled = laserMachines.length < 2;
+  updateMachineNote();
+}
+
+function updateMachineNote() {
+  const machine = currentMachine();
+  const reported = Number(S.settings?.[30]);
+  const note = $('#laser-machine-note');
+  if (Number.isFinite(reported) && reported > 0 && reported !== machine.sMax) {
+    note.textContent = `Le contrôleur rapporte $30=${fmtNum(reported)} : réglez S max du profil sur cette valeur.`;
+  } else if (Number.isFinite(reported) && reported > 0) {
+    note.textContent = `S max correspond au $30 du contrôleur. Plateau ${fmtNum(machine.bedWidth)} × ${fmtNum(machine.bedHeight)} mm.`;
+  } else {
+    note.textContent = `Plateau ${fmtNum(machine.bedWidth)} × ${fmtNum(machine.bedHeight)} mm. Connectez la machine pour comparer S max à $30.`;
+  }
+}
+
+function saveMachines() {
+  renderMachines();
+  saveLaserConfig();
+}
+
+$('#laser-machine').onchange = (e) => { laserMachineId = e.target.value; saveMachines(); };
+$('#laser-machine-save').onclick = () => {
+  try {
+    const machine = sanitizeMachine({
+      id: laserMachineId,
+      name: $('#laser-machine-name').value,
+      bedWidth: Number($('#laser-bed-width').value),
+      bedHeight: Number($('#laser-bed-height').value),
+      sMax: Number($('#laser-smax').value),
+    });
+    laserMachines = laserMachines.map((m) => (m.id === machine.id ? machine : m));
+    saveMachines();
+    toast(`Profil machine « ${machine.name} » enregistré`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+};
+$('#laser-machine-new').onclick = () => {
+  const machine = { ...currentMachine(), id: `machine-${Date.now()}`, name: `${currentMachine().name} (copie)`.slice(0, 60) };
+  laserMachines.push(machine);
+  laserMachineId = machine.id;
+  saveMachines();
+  $('#laser-machine-name').focus();
+};
+$('#laser-machine-delete').onclick = () => {
+  const machine = currentMachine();
+  if (laserMachines.length < 2 || !confirm(`Supprimer le profil machine « ${machine.name} » ?`)) return;
+  laserMachines = laserMachines.filter((m) => m.id !== machine.id);
+  laserMachineId = laserMachines[0].id;
+  saveMachines();
+};
+
+function renderLayers() {
+  $('#laser-layer-rows').replaceChildren(...laserLayers.map((layer) => {
+    const label = LAYER_COLORS.find((c) => c.id === layer.id)?.label || '';
+    const row = document.createElement('tr');
+    row.dataset.layer = layer.id;
+    row.innerHTML = `<td><span class="laser-swatch" title="${label}"><i style="background:${layer.color}"></i>${layer.id}</span></td>`
+      + `<td><input type="checkbox" data-key="enabled" aria-label="Activer le calque ${layer.id}"${layer.enabled ? ' checked' : ''}></td>`
+      + `<td><input type="number" data-key="feed" min="1" max="30000" step="50" value="${layer.feed}" aria-label="Avance du calque ${layer.id} en mm/min"></td>`
+      + `<td><input type="number" data-key="power" min="1" step="1" value="${layer.power}" aria-label="Puissance S du calque ${layer.id}"></td>`
+      + `<td><input type="number" data-key="passes" min="1" max="10" step="1" value="${layer.passes}" aria-label="Passes du calque ${layer.id}"></td>`;
+    return row;
+  }));
+  const useLayers = $('#laser-use-layers').checked;
+  $('#laser-layers').hidden = !useLayers;
+  for (const id of ['#laser-feed', '#laser-power', '#laser-invert']) $(id).disabled = useLayers;
+}
+
+function readLayers() {
+  return sanitizeLayers([...$('#laser-layer-rows').rows].map((row) => {
+    const value = (key) => row.querySelector(`[data-key="${key}"]`);
+    return {
+      id: row.dataset.layer,
+      enabled: value('enabled').checked,
+      feed: Number(value('feed').value),
+      power: Number(value('power').value),
+      passes: Number(value('passes').value),
+    };
+  }));
+}
+
+$('#laser-layer-rows').onchange = () => {
+  try { laserLayers = readLayers(); saveLaserConfig(); } catch (e) { toast(e.message, 'err'); }
+};
+$('#laser-use-layers').onchange = () => { renderLayers(); saveLaserConfig(); };
+
+function readLaserJob() {
+  return {
+    resolution: Number($('#laser-resolution').value),
+    feed: Number($('#laser-feed').value),
+    power: Number($('#laser-power').value),
+    overscan: Number($('#laser-overscan').value),
+    invert: $('#laser-invert').checked,
+    useLayers: $('#laser-use-layers').checked,
+    layers: readLayers(),
+  };
+}
+
+function applyPreset(preset) {
+  $('#laser-resolution').value = preset.resolution;
+  $('#laser-feed').value = preset.feed;
+  $('#laser-power').value = preset.power;
+  $('#laser-overscan').value = preset.overscan;
+  $('#laser-invert').checked = preset.invert;
+  $('#laser-use-layers').checked = preset.useLayers;
+  laserLayers = preset.layers.map((layer) => ({ ...layer }));
+  renderLayers();
+  saveLaserConfig();
+}
+
+function renderPresets(selected = $('#laser-preset').value) {
+  const select = $('#laser-preset');
+  select.replaceChildren(
+    new Option(laserPresets.length ? '— Choisir un préréglage —' : 'Aucun préréglage enregistré', ''),
+    ...laserPresets.map((p, i) => new Option(`${i + 1}. ${p.name}`, String(i), false, String(i) === selected)),
+  );
+  const index = select.value;
+  $('#laser-preset-name').value = index === '' ? '' : laserPresets[index].name;
+  $('#laser-preset-delete').disabled = index === '';
+}
+
+function savePresets(selected) {
+  renderPresets(selected);
+  saveLaserConfig();
+}
+
+$('#laser-preset').onchange = (e) => {
+  renderPresets(e.target.value);
+  if (e.target.value !== '') {
+    applyPreset(laserPresets[e.target.value]);
+    toast(`Préréglage ${Number(e.target.value) + 1} appliqué`, 'ok');
+  }
+};
+const storePreset = (index) => {
+  try {
+    const fallback = `Profil ${index === null ? laserPresets.length + 1 : index + 1}`;
+    const preset = sanitizePreset({ ...readLaserJob(), name: $('#laser-preset-name').value.trim() || fallback });
+    if (index === null) laserPresets.push(preset);
+    else laserPresets[index] = preset;
+    const position = index ?? laserPresets.length - 1;
+    savePresets(String(position));
+    toast(`Préréglage ${position + 1} « ${preset.name} » enregistré`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+};
+$('#laser-preset-save').onclick = () => {
+  const index = $('#laser-preset').value;
+  storePreset(index === '' ? null : Number(index));
+};
+$('#laser-preset-new').onclick = () => {
+  if ($('#laser-preset').value !== '' && $('#laser-preset-name').value === laserPresets[$('#laser-preset').value].name) {
+    $('#laser-preset-name').value = '';
+  }
+  storePreset(null);
+};
+$('#laser-preset-delete').onclick = () => {
+  const index = $('#laser-preset').value;
+  if (index === '' || !confirm(`Supprimer le préréglage ${Number(index) + 1} « ${laserPresets[index].name} » ?`)) return;
+  laserPresets.splice(Number(index), 1);
+  savePresets('');
+};
+
+renderMachines();
+renderLayers();
+renderPresets('');
+
+function hasActiveJob() {
+  return ['running', 'paused', 'spinup', 'finishing', 'stopping', 'toolchange'].includes(S.job?.state);
+}
+
+async function generateLaserFile(file) {
+  if (!file) return;
+  if (hasActiveJob() || S.machine.status.state === 'Jog') return toast('Arrêtez le programme ou le jog avant de générer un parcours.', 'err');
+  lastLaserProgram = null;
+  lastLaserName = '';
+  $('#laser-save').hidden = true;
+  if (file.size > 30 * 1024 * 1024) return toast('Image trop grosse (30 Mo max)', 'err');
+  const machine = currentMachine();
+  const widthMm = Number($('#laser-width').value);
+  let job;
+  try { job = readLaserJob(); } catch (e) { return toast(e.message, 'err'); }
+  const { resolution: pixelsPerMm, feed, power: maxPower, overscan: overscanPercent } = job;
+  if (![widthMm, pixelsPerMm, feed, maxPower, overscanPercent].every(Number.isFinite)
+    || widthMm < 1 || widthMm > machine.bedWidth || pixelsPerMm < 1 || pixelsPerMm > 20
+    || feed <= 0 || maxPower <= 0 || overscanPercent < 0 || overscanPercent > 20) {
+    return toast(`Vérifiez largeur (≤ ${fmtNum(machine.bedWidth)} mm), résolution, avance, puissance et marge raster (0 à 20 %).`, 'err');
+  }
+  const powerErrors = powerLimitErrors(job, machine);
+  if (powerErrors.length) {
+    $('#laser-status').textContent = powerErrors.join(' ');
+    return toast(powerErrors[0], 'err');
+  }
+  laserBusy = true;
+  $('#laser-status').textContent = 'Préparation de l’image et calcul du parcours…';
+  updateEnabled();
+  try {
+    const result = await rasterizeImage(file, {
+      widthMm, pixelsPerMm, feed, maxPower, invert: job.invert, overscanPercent, layers: job.useLayers ? job.layers : null,
+    });
+    const bedError = bedLimitError(result, machine);
+    if (bedError) throw new Error(bedError);
+    const name = `${file.name.replace(/\.[^.]+$/, '')}.laser.nc`;
+    lastLaserProgram = result.text;
+    lastLaserName = name;
+    if (!setLaserMode(true)) return;
+    await act('load', { name, text: result.text });
+    $('#laser-save').hidden = false;
+    const margin = result.overscanMm > 0 ? ` · marge ±${fmtNum(result.overscanMm)} mm` : '';
+    const layers = result.layers ? ` · calques ${result.layers.join(', ')}` : '';
+    $('#laser-status').textContent = `Parcours chargé pour ${machine.name} : ${fmtNum(result.widthMm)} × ${fmtNum(result.heightMm)} mm · ${result.pixelWidth} × ${result.pixelHeight} pixels${margin}${layers}. Vérifiez le cadrage et simulez avant le démarrage.`;
+    toast('Parcours laser généré et chargé', 'ok');
+  } catch (e) {
+    $('#laser-status').textContent = e.message;
+    toast(e.message, 'err');
+  } finally {
+    laserBusy = false;
+    updateEnabled();
+  }
+}
+
+$('#laser-generate').onclick = () => generateLaserFile(laserSource);
+$('#laser-save').onclick = () => {
+  if (!lastLaserProgram) return;
+  const url = URL.createObjectURL(new Blob([lastLaserProgram], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = lastLaserName || 'gravure.laser.nc';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
 $('#file-input').onchange = (e) => { loadFile(e.target.files[0]); e.target.value = ''; };
 const wrap = $('.viewer-wrap');
 wrap.addEventListener('dragover', (e) => { e.preventDefault(); wrap.classList.add('dragging'); });
@@ -504,14 +866,14 @@ function renderJob() {
   const j = S.job;
   if (j && ['running', 'finishing'].includes(j.state)) closePreview();
   const bar = $('#job-progress');
-  if (!j) { bar.style.width = '0'; updateEnabled(); return; }
+  if (!j) { setToolchangeDialog(false); bar.style.width = '0'; updateEnabled(); return; }
   const pct = j.total ? (j.acked / j.total) * 100 : 0;
   bar.style.width = `${pct}%`;
   viewer.setProgress(j.state === 'loaded' ? 0 : j.acked);
   renderTimes();
   if (j.error && j.error !== lastJobError) { lastJobError = j.error; toast(j.error, 'err'); }
-  $('#toolchange').hidden = j.state !== 'toolchange';
   if (j.state === 'toolchange') $('#tool-number').textContent = `T${j.tool}`;
+  setToolchangeDialog(j.state === 'toolchange');
   if (j.state === 'done' && lastJobState !== 'done') toast(`Job terminé en ${fmtDuration((j.finishedAt - j.startedAt) / 1000)}`, 'ok');
   lastJobState = j.state;
   updateEnabled();
@@ -519,6 +881,39 @@ function renderJob() {
 let lastJobState = null;
 let lastError = null;
 let lastJobError = null;
+
+let toolchangeReturnFocus = null;
+function setToolchangeDialog(open) {
+  const dialog = $('#toolchange');
+  if (open === !dialog.hidden) return;
+  dialog.hidden = !open;
+  if (open) {
+    toolchangeReturnFocus = document.activeElement;
+    $('#toolchange-title').focus();
+    return;
+  }
+  const target = toolchangeReturnFocus;
+  toolchangeReturnFocus = null;
+  if (target?.isConnected && !target.disabled && target.getClientRects().length) target.focus();
+  else $('#job-bar').focus();
+}
+
+$('#toolchange').addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const dialog = e.currentTarget;
+  const focusable = [...dialog.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+    .filter((el) => el.getClientRects().length);
+  if (!focusable.length) { e.preventDefault(); return; }
+  const first = focusable[0], last = focusable.at(-1);
+  const activeIndex = focusable.indexOf(document.activeElement);
+  if (e.shiftKey && activeIndex <= 0) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && (activeIndex === -1 || activeIndex === focusable.length - 1)) {
+    e.preventDefault();
+    first.focus();
+  }
+});
 function toastOnce(msg) {
   if (msg === lastError) return;
   lastError = msg;
@@ -531,7 +926,7 @@ function renderTimes() {
   if (!j) return;
   let label = JOB_STATE[j.state] || j.state;
   if (j.state === 'spinup' && j.spinUpUntil) label += ` (${Math.max(0, Math.ceil((j.spinUpUntil - Date.now()) / 1000))} s)`;
-  else if (j.state === 'paused' && j.spindleHeld) label += ', broche coupée';
+  else if (j.state === 'paused' && j.spindleHeld) label += S.laserMode ? ', laser coupé' : ', broche coupée';
   const pct = j.total ? Math.round((j.acked / j.total) * 100) : 0;
   if (!j.startedAt || j.state === 'loaded') {
     $('#job-elapsed').textContent = label;
@@ -547,25 +942,40 @@ function renderTimes() {
 }
 setInterval(renderTimes, 1000);
 
-$('#btn-run').onclick = () => {
+$('#btn-run').onclick = async () => {
+  if (S.laserMode) {
+    const safeLines = normalizeLaserText(S.lines.join('\n'));
+    const errors = validateLaserProgram(safeLines, S.settings);
+    if (errors.length) return toast(errors.join(' '), 'err');
+    if (safeLines.length !== S.lines.length || safeLines.some((line, i) => line !== S.lines[i])) {
+      try {
+        await act('load', { name: S.job.name, text: safeLines.join('\n') });
+      } catch {
+        return;
+      }
+    }
+    if (!confirm('Démarrer la gravure laser ? Vérifiez le cadrage, l’enceinte fermée, les lunettes adaptées et l’extraction des fumées. Ne laissez jamais la machine sans surveillance.')) return;
+  }
   const fit = fitCheck();
   if (fit && !fit.ok && !confirm(`${fit.text}\n\nDémarrer quand même ?`)) return;
-  if (S.info && Number.isFinite(S.info.min.Z) && S.info.min.Z < 0 && !confirm('Démarrer l\'usinage ? Vérifiez l\'origine, le serrage et la broche.')) return;
+  if (!S.laserMode && S.info && Number.isFinite(S.info.min.Z) && S.info.min.Z < 0 && !confirm('Démarrer l\'usinage ? Vérifiez l\'origine, le serrage et la broche.')) return;
   act('run', { from: 0 }).catch(() => {});
 };
-$('#opt-pause-spindle').checked = store.get('pauseSpindle', false);
-$('#opt-pause-spindle').onchange = (e) => store.set('pauseSpindle', e.target.checked);
+$('#opt-pause-spindle').onchange = (e) => {
+  pauseSpindlePreference = e.target.checked;
+  store.set('pauseSpindle', pauseSpindlePreference);
+};
 const spinUpSeconds = () => { const v = Number($('#resume-spinup').value); return Number.isFinite(v) && v >= 0 ? v : 3; };
 $('#btn-pause').onclick = () => {
   const j = S.job;
-  // Reprise après une pause ou un M0 : le serveur rallume la broche si besoin.
+  // Reprise après une pause ou un M0 : le serveur réactive la sortie si besoin.
   if (j?.state === 'paused' || (j?.state === 'running' && ['Hold', 'Door'].includes(S.machine.status.state))) {
-    act('resume', { spinUp: spinUpSeconds() }).catch(() => {});
+    act('resume', { spinUp: S.laserMode ? 0 : spinUpSeconds() }).catch(() => {});
   } else {
-    act('pause', { stopSpindle: $('#opt-pause-spindle').checked }).catch(() => {});
+    act('pause', { stopSpindle: S.laserMode || $('#opt-pause-spindle').checked }).catch(() => {});
   }
 };
-$('#btn-spindle').onclick = () => act('spindleStop').then(() => toast('Broche coupée : elle se rallumera à la reprise', 'ok')).catch(() => {});
+$('#btn-spindle').onclick = () => act('spindleStop').then(() => toast(S.laserMode ? 'Laser coupé : il se réactivera à la reprise' : 'Broche coupée : elle se rallumera à la reprise', 'ok')).catch(() => {});
 $('#btn-stop').onclick = () => act('stop').catch(() => {});
 $('#btn-tool-continue').onclick = () => act('toolDone').catch(() => {});
 $('#btn-tool-stop').onclick = () => act('stop').catch(() => {});
@@ -655,18 +1065,96 @@ $('#btn-resume-run').onclick = () => {
   act('run', { from: n - 1, spinUp: spinUpSeconds(), safeZ: safeZ() }).catch(() => {});
 };
 
-// ---- Onglets ---------------------------------------------------------------
+// ---- Espaces de travail et panneaux -----------------------------------------
 
-let activeTab = $(`.tab[data-pane="${location.hash.slice(1)}"]`) ? location.hash.slice(1) : store.get('tab', 'console');
-function showTab(name) {
-  activeTab = name;
-  store.set('tab', name);
-  $$('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  $$('.tab').forEach((p) => (p.hidden = p.dataset.pane !== name));
-  if (name === 'resume') setResumeLine(Number($('#resume-line').value));
+const workspaceCopy = {
+  cnc: ['Pilotage CNC', 'Console, reprise et palpage pour préparer votre usinage.'],
+  laser: ['Atelier laser', 'Préparez vos images, profils et calques. Le mode laser reste à activer explicitement.'],
+  configuration: ['Configuration machine', 'Réglages Grbl, plateau, zones de travail et macros.'],
+};
+const savedWorkspaceTabs = store.get('workspaceTabs', {});
+const workspaceTabs = savedWorkspaceTabs && typeof savedWorkspaceTabs === 'object' ? savedWorkspaceTabs : {};
+const hashTab = location.hash.slice(1);
+const initialTab = $$('.tab').some((p) => p.dataset.pane === hashTab)
+  ? hashTab : store.get('tab', S.laserMode ? 'laser' : 'console');
+let activeWorkspace = workspaceForTab(initialTab, store.get('workspace', S.laserMode ? 'laser' : 'cnc'));
+let activeTab = workspaceTab(activeWorkspace, initialTab);
+const panelScroll = new Map();
+
+for (const button of $$('.tabs [data-tab]')) {
+  button.id = `tool-${button.dataset.tab}`;
+  button.setAttribute('role', 'tab');
+  button.setAttribute('aria-controls', `pane-${button.dataset.tab}`);
+}
+for (const pane of $$('.tab')) {
+  pane.id = `pane-${pane.dataset.pane}`;
+  pane.setAttribute('role', 'tabpanel');
+  pane.setAttribute('aria-labelledby', `tool-${pane.dataset.pane}`);
+}
+
+function showTab(name, workspace = workspaceForTab(name, activeWorkspace)) {
+  if (!$$('.tab').some((pane) => pane.dataset.pane === name)) return;
+  panelScroll.set(`${activeWorkspace}.${activeTab}`, $('.panel.right').scrollTop);
+  activeWorkspace = workspace;
+  activeTab = workspaceTab(activeWorkspace, name);
+  workspaceTabs[activeWorkspace] = activeTab;
+  store.set('workspace', activeWorkspace);
+  store.set('workspaceTabs', workspaceTabs);
+  store.set('tab', activeTab);
+  document.body.dataset.workspace = activeWorkspace;
+  $('#workspace-panel').setAttribute('aria-labelledby', `workspace-${activeWorkspace}`);
+  const [title, description] = workspaceCopy[activeWorkspace];
+  $('#workspace-title').textContent = title;
+  $('#workspace-description').textContent = description;
+  $$('.workspace-tabs [data-workspace]').forEach((button) => {
+    const selected = button.dataset.workspace === activeWorkspace;
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  $$('.tabs [data-tab]').forEach((button) => {
+    const selected = button.dataset.tab === activeTab;
+    button.hidden = !WORKSPACES[activeWorkspace].tabs.includes(button.dataset.tab);
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  const visibleTabs = $$('.tabs [data-tab]').filter((button) => !button.hidden);
+  if (visibleTabs.some((button, index) => button.dataset.tab !== WORKSPACES[activeWorkspace].tabs[index])) {
+    for (const tab of WORKSPACES[activeWorkspace].tabs) $('.tabs').append($(`[data-tab="${tab}"]`));
+  }
+  $$('.tab').forEach((pane) => (pane.hidden = pane.dataset.pane !== activeTab));
+  $('.panel.right').scrollTop = panelScroll.get(`${activeWorkspace}.${activeTab}`) || 0;
+  if (activeTab === 'resume') setResumeLine(Number($('#resume-line').value));
   else viewer.setMarker(0);
 }
-$('.tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); };
+
+function showWorkspace(name) {
+  if (!Object.hasOwn(WORKSPACES, name)) return;
+  showTab(workspaceTab(name, workspaceTabs[name]), name);
+}
+
+$('.workspace-tabs').onclick = (e) => {
+  const button = e.target.closest('[data-workspace]');
+  if (button) showWorkspace(button.dataset.workspace);
+};
+$('.tabs').onclick = (e) => {
+  const button = e.target.closest('[data-tab]');
+  if (button) showTab(button.dataset.tab);
+};
+function navigateTabs(e) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  const buttons = $$('[role="tab"]', e.currentTarget).filter((button) => !button.hidden);
+  const index = buttons.indexOf(e.target);
+  if (index < 0) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1
+    : (index + (e.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+  buttons[next].click();
+  buttons[next].focus();
+}
+$('.workspace-tabs').onkeydown = navigateTabs;
+$('.tabs').onkeydown = navigateTabs;
 showTab(activeTab);
 
 // ---- Console ---------------------------------------------------------------
@@ -947,8 +1435,8 @@ function pointRow(label, key, p, capLabel) {
   const w = toWork(p);
   const v = (a) => (w ? r3(w[a]) : '');
   return `<div class="zone-pt"><span>${label}</span>
-    <input type="number" step="any" data-pt="${key}" data-axis="X" placeholder="X" value="${v('X')}" class="${w ? '' : 'empty'}">
-    <input type="number" step="any" data-pt="${key}" data-axis="Y" placeholder="Y" value="${v('Y')}" class="${w ? '' : 'empty'}">
+    <input type="number" step="any" data-pt="${key}" data-axis="X" placeholder="X" aria-label="${label} X (mm)" value="${v('X')}" class="${w ? '' : 'empty'}">
+    <input type="number" step="any" data-pt="${key}" data-axis="Y" placeholder="Y" aria-label="${label} Y (mm)" value="${v('Y')}" class="${w ? '' : 'empty'}">
     <button class="ghost small" data-cap="${key}" title="Prendre la position actuelle de l'outil">${capLabel}</button></div>`;
 }
 
@@ -965,7 +1453,7 @@ function renderZoneCard(target) {
   form.innerHTML = d.kind === 'circle'
     ? pointRow('Centre', 'c', d.c, 'Capturer') +
       `<div class="zone-pt"><span>Rayon</span>
-        <input type="number" step="any" min="0" data-radius placeholder="R" value="${d.r ? r3(d.r) : ''}" class="${d.r ? '' : 'empty'}">
+        <input type="number" step="any" min="0" data-radius placeholder="R" aria-label="Rayon de la zone de travail (mm)" value="${d.r ? r3(d.r) : ''}" class="${d.r ? '' : 'empty'}">
         <span></span>
         <button class="ghost small" data-cap="edge" title="Rayon = distance entre le centre et la position actuelle">Point du bord</button></div>`
     : pointRow('Coin 1', 'a', d.a, 'Capturer') + pointRow('Coin 2', 'b', d.b, 'Capturer');
@@ -982,12 +1470,12 @@ function renderTableDims(card, saved) {
   const w = val(saved && Math.abs(saved.b.X - saved.a.X), 130);
   const h = val(saved && Math.abs(saved.b.Y - saved.a.Y), 131);
   const z = val(saved ? saved.z || undefined : undefined, 132);
-  const field = (k, v, ph) => `<input type="number" step="any" min="1" data-dim="${k}" placeholder="${ph}" value="${v}" class="${v !== '' ? '' : 'empty'}" title="Course ${k} (mm)">`;
+  const field = (k, v, ph) => `<input type="number" step="any" min="1" data-dim="${k}" placeholder="${ph}" aria-label="Course machine ${k} (mm)" value="${v}" class="${v !== '' ? '' : 'empty'}">`;
   const anchor = store.get('tableAnchor', 'machine');
   box.innerHTML = `
     <div class="zone-dims-row"><span>Course</span>${field('X', w, 'X')}${field('Y', h, 'Y')}${field('Z', z, 'Z')}</div>
     <div class="zone-dims-anchor"><span>Ancrage ${ibtn('anchor')}</span>
-      <select data-anchor>
+      <select data-anchor aria-label="Ancrage de la course machine">
         <option value="machine"${anchor === 'machine' ? ' selected' : ''}>Origine machine (Grbl, vers X− Y−)</option>
         <option value="coin1"${anchor === 'coin1' ? ' selected' : ''}>Coin 1 fixe</option>
         <option value="tool"${anchor === 'tool' ? ' selected' : ''}>Outil = coin avant gauche</option>
@@ -1484,7 +1972,10 @@ $('#macro-list').onclick = async (e) => {
   const row = e.target.closest('.macro');
   if (!row) return;
   const m = S.macros.find((x) => x.id === row.dataset.id);
-  if (e.target.closest('[data-macro-run]')) act('runMacro', { id: m.id }).catch(() => {});
+  if (e.target.closest('[data-macro-run]')) {
+    if (S.laserMode) return toast('Les macros sont bloquées en mode laser.', 'err');
+    act('runMacro', { id: m.id }).catch(() => {});
+  }
   if (e.target.closest('[data-macro-edit]')) {
     editingMacro = m.id;
     $('#macro-name').value = m.name;
@@ -1640,6 +2131,7 @@ function escapeHtml(s) {
 }
 
 renderMachine();
+setLaserMode(S.laserMode, { reveal: false });
 connectWs();
 const tourParam = new URLSearchParams(location.search).get('tour');
 if (tourParam !== null) setTimeout(() => runTour(Math.max(0, Number(tourParam) || 0)), 600);

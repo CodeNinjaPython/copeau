@@ -2,12 +2,20 @@
   "name": "copeau",
   "version": "0.1.0",
   "description": "Interface web pour piloter une CNC Grbl / grblHAL",
+  "author": "CodeNinjaPython",
+  "homepage": "https://github.com/CodeNinjaPython/copeau",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CodeNinjaPython/copeau.git"
+  },
+  "desktopName": "copeau.desktop",
   "type": "module",
   "main": "desktop/main.js",
   "scripts": {
     "start": "node server/index.js",
     "desktop": "electron .",
     "build:portable": "electron-builder --win portable",
+    "build:linux": "electron-builder --linux AppImage deb --x64 --publish never",
     "test": "eslint . && node --test test/*.test.js",
     "lint": "eslint ."
   },
@@ -46,6 +54,41 @@
     "win": {
       "target": "portable",
       "artifactName": "Copeau-Portable-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility",
+      "synopsis": "Interface pour piloter une CNC Grbl",
+      "maintainer": "Copeau <noreply@github.com>",
+      "syncDesktopName": true,
+      "publish": null,
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "files": [
+        "desktop/**/*",
+        "server/**/*",
+        "public/**/*",
+        "docs/**/*"
+      ]
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "udev"
+      ]
+    },
+    "toolsets": {
+      "appimage": "1.0.3"
     },
     "npmRebuild": false
   }
