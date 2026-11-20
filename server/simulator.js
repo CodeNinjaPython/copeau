@@ -136,9 +136,16 @@ export class GrblSimulator extends EventEmitter {
       case 0x3f: this.sendStatus(); return true;
       case 0x21:
         if (this.planner.some((x) => x.jog)) this.cancelJog();
-        else if (this.planner.length) this.hold = true;
+        else if (this.planner.length && !this.hold) {
+          // Freinage (Hold:1) avant l'arrêt complet (Hold:0), ~150 ms sur une vraie machine.
+          this.hold = true;
+          this.holdUntil = Date.now() + 150 / Math.max(1, this.speedup);
+        }
         return true;
-      case 0x7e: this.hold = false; this.spindleStopOvr = false; return true; // Grbl rallume la broche à la reprise
+      case 0x7e:
+        // Grbl ignore la reprise tant que la pause n'est pas complète.
+        if (this.hold && Date.now() < this.holdUntil) return true;
+        this.hold = false; this.spindleStopOvr = false; return true; // Grbl rallume la broche à la reprise
       case 0x9e: if (this.hold) this.spindleStopOvr = !this.spindleStopOvr; return true;
       case 0x18: this.softReset(); return true;
       case 0x85: this.cancelJog(); return true;
@@ -174,7 +181,7 @@ export class GrblSimulator extends EventEmitter {
 
   machineState() {
     if (this.alarm) return 'Alarm';
-    if (this.hold) return 'Hold:0';
+    if (this.hold) return Date.now() < this.holdUntil ? 'Hold:1' : 'Hold:0';
     if (this.planner.some((x) => x.homing)) return 'Home';
     if (this.planner.some((x) => x.jog)) return 'Jog';
     if (this.planner.length) return 'Run';

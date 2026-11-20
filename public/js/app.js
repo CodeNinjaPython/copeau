@@ -602,7 +602,7 @@ function renderJob() {
   renderTimes();
   if (j.error && j.error !== lastJobError) { lastJobError = j.error; toast(j.error, 'err'); }
   $('#toolchange').hidden = j.state !== 'toolchange';
-  if (j.state === 'stopped' && j.resumeFrom !== null && lastJobState !== 'stopped') setupResume();
+  if (j.state === 'stopped' && (j.resumeFrom !== null || j.lostAt) && lastJobState !== 'stopped') setupResume();
   if (j.state === 'toolchange') $('#tool-number').textContent = `T${j.tool}`;
   if (j.state === 'done' && lastJobState !== 'done') toast(`Job terminé en ${fmtDuration((j.finishedAt - j.startedAt) / 1000)}`, 'ok');
   lastJobState = j.state;
@@ -682,7 +682,8 @@ function setupResume() {
   if (S.job?.state === 'stopped' && S.job.resumeFrom !== null && S.job.resumeFrom !== undefined) {
     suggested = S.job.resumeFrom + 1;
   } else if (S.job && ['stopped', 'paused'].includes(S.job.state)) {
-    const near = viewer.nearestLine(S.machine.status.wpos, Math.max(0, S.job.acked - 200), S.job.acked);
+    // Carte redémarrée : sa position est perdue, on part de la dernière connue.
+    const near = viewer.nearestLine(S.job.lostAt || S.machine.status.wpos, Math.max(0, S.job.acked - 200), S.job.acked);
     suggested = near !== null ? near + 1 : Math.max(1, S.job.acked - 1);
   }
   setResumeLine(suggested);

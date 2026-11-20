@@ -355,6 +355,21 @@ export class GrblController extends EventEmitter {
     this.pointer = null;
     clearTimeout(this.bannerTimer);
     clearTimeout(this.silenceTimer);
+    // Bannière inattendue en plein usinage : la carte a redémarré toute seule
+    // (chute de tension ou parasite au démarrage de la broche, câble USB…).
+    // Elle a tout oublié : position machine remise à 0, broche arrêtée. Les
+    // lignes suivantes seraient refusées (error:9) ou, sans prise d'origine,
+    // exécutées au mauvais endroit : on arrête le job.
+    const j = this.job;
+    if (this.ready && j && ['running', 'paused', 'spinup', 'toolchange', 'finishing'].includes(j.state)) {
+      j.lostAt = { ...this.status.wpos }; // dernière position connue, pour la reprise
+      j.state = 'stopped';
+      j.error = 'La carte a redémarré pendant l\'usinage (chute de tension ou parasite au démarrage de la broche, câble USB ?). '
+        + 'Position perdue : faites l\'origine ($H) et vérifiez le zéro, puis reprenez depuis l\'onglet Reprise.';
+      this.spindleHeld = false;
+      this.log('err', j.error);
+      this.emitJob();
+    }
     this.failPending(new Error('Reset'));
     this.ready = true;
     this.version = version;
@@ -541,6 +556,7 @@ export class GrblController extends EventEmitter {
       // $J= et commandes $ passent ; le G-code (programme, console, macros,
       // palpage) attend que le jog soit vraiment terminé.
       if (item.line[0] !== '$' && !this.jogSettled()) break;
+      if (fromJob && this.status.state === 'Alarm') break;
       const len = Buffer.byteLength(item.line) + 1;
       if (this.inflight.length && this.inflightBytes + len > RX_BUFFER) break;
       if (fromJob) this.jobTake(item);
@@ -619,6 +635,7 @@ export class GrblController extends EventEmitter {
     if (this.pointer) throw new Error('Éteignez d\'abord le tir de repérage');
     from = Math.max(0, Math.min(Math.floor(from), j.lines.length - 1));
     j.resumeFrom = null;
+    j.lostAt = null;
     j.prelude = from > 0 ? buildResume(j.lines, from, { ...opts, laser: this.profile.laser, firmware: this.profile.firmware }).lines : [];
     if (from > 0) this.log('info', `Reprise à la ligne ${from + 1} : ${j.prelude.join(' | ')}`);
     j.next = from;
@@ -697,22 +714,26 @@ export class GrblController extends EventEmitter {
     this.emitJob();
     // Laser : Grbl éteint le laser pendant une pause en mode laser
     // (DISABLE_LASER_DURING_HOLD). Un « spindle stop » le rallumerait.
-    if (stopSpindle && !this.profile.laser) this.stopSpindleInPause().catch((e) => this.log('err', e.message));
+    if (stopSpindle && !this.profile.laser) this.stopSpindleInPause({ auto: true }).catch((e) => this.log('err', e.message));
   }
 
   // Coupe la broche pendant une pause. Grbl n'accepte « spindle stop » (0x9E)
   // qu'une fois le mouvement complètement arrêté (Hold:0) : on attend cet état.
-  async stopSpindleInPause() {
+  // auto : demandé par la pause elle-même ; abandonné si l'utilisateur a
+  // repris entre-temps (sinon la broche s'arrêterait en pleine reprise).
+  async stopSpindleInPause({ auto = false } = {}) {
     if (this.profile.laser) throw new Error('Laser : la carte éteint le laser pendant la pause');
     if (this.spindleHeld) return;
     const deadline = Date.now() + 8000;
     let s = this.status;
     while (!(s.state === 'Hold' && s.subState === '0')) {
+      if (auto && this.job?.state !== 'paused') return;
       if (Date.now() > deadline || !['Hold', 'Run'].includes(s.state)) {
         throw new Error('Broche non coupée : la machine doit être en pause complète');
       }
       s = await this.nextStatus();
     }
+    if (auto && this.job?.state !== 'paused') return;
     this.realtime('spindleStop');
     this.spindleHeld = true;
     this.log('info', 'Broche coupée pendant la pause');
@@ -737,6 +758,16 @@ export class GrblController extends EventEmitter {
       this.emitJob();
       await new Promise((r) => setTimeout(r, spinUp * 1000));
       if (j.state !== 'spinup') return; // arrêté pendant l'attente
+    }
+    // Grbl ignore « ~ » tant que la machine freine encore (Hold:1) : la reprise
+    // serait perdue et la machine resterait en pause. On attend l'arrêt complet.
+    if (!this.isSmoothie && this.status.state === 'Hold' && this.status.subState !== '0') {
+      const resumeState = j.state;
+      const deadline = Date.now() + 5000;
+      while (this.status.state === 'Hold' && this.status.subState !== '0' && Date.now() < deadline) {
+        await this.nextStatus().catch(() => {});
+      }
+      if (j.state !== resumeState || !this.ready) return; // arrêté ou carte perdue entre-temps
     }
     j.state = 'running';
     j.error = null;
@@ -893,7 +924,7 @@ export class GrblController extends EventEmitter {
     return {
       name: j.name, total: j.lines.length, acked: j.acked, sent: j.next, startIndex: j.startIndex,
       state: j.state, error: j.error, tool: j.tool, startedAt: j.startedAt, finishedAt: j.finishedAt,
-      spinUpUntil: j.spinUpUntil ?? null, spindleHeld: this.spindleHeld, resumeFrom: j.resumeFrom ?? null,
+      spinUpUntil: j.spinUpUntil ?? null, spindleHeld: this.spindleHeld, resumeFrom: j.resumeFrom ?? null, lostAt: j.lostAt ?? null,
     };
   }
 

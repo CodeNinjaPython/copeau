@@ -207,3 +207,49 @@ test('G-code envoyé pendant un jog : il attend la fin au lieu d\'être refusé'
     assert.deepEqual(errors, []);
   } finally { close(); }
 });
+
+test('carte qui redémarre à la relance de la broche : job arrêté, aucune ligne envoyée à l\'aveugle', async () => {
+  const { c, close } = await setup();
+  try {
+    const sim = c.transport;
+    const errors = [];
+    c.on('log', (e) => { if (e.dir === 'err') errors.push(e.text); });
+    c.loadJob('pause.nc', ['G21G90', 'M3S12000', 'G0Z5', ...Array.from({ length: 60 }, (_, i) => `G1X${i % 2 ? 40 : 0}Y${i}Z-1F600`), 'M5'].join('\n'));
+    c.runJob(0);
+    await waitFor(() => c.status.state === 'Run');
+    c.pauseJob({ stopSpindle: true });
+    await waitFor(() => c.spindleHeld);
+    const before = { ...c.status.wpos };
+    const resumed = c.resumeJob({ spinUp: 0.3 });
+    // La broche redémarre… et la carte avec (chute de tension) : bannière, alarme.
+    sim.alarm = true; sim.planner = []; sim.powerOn();
+    await resumed;
+    await waitFor(() => c.job.state === 'stopped');
+    await new Promise((r) => setTimeout(r, 400));
+    assert.match(c.job.error, /redémarré/);
+    assert.deepEqual(c.jobSnapshot().lostAt, before);
+    assert.ok(!errors.some((t) => /error:9/.test(t)), errors.join('\n'));
+  } finally { close(); }
+});
+
+test('Reprendre pendant le freinage : la reprise n\'est pas perdue, la broche reste allumée', async () => {
+  const c = new GrblController();
+  const sim = new GrblSimulator({ speedup: 1 }); // freinage réaliste (~150 ms)
+  c.attach(sim, 'sim');
+  try {
+    await waitFor(() => c.ready);
+    await c.cmd('$X');
+    await c.nextStatus();
+    c.loadJob('frein.nc', ['G21G90', 'M3S12000', ...Array.from({ length: 6 }, (_, i) => `G1X${i % 2 ? 20 : 0}F6000`)].join('\n'));
+    c.runJob(0);
+    await waitFor(() => c.status.state === 'Run');
+    c.pauseJob({ stopSpindle: true });
+    await c.resumeJob({ spinUp: 3 }); // aussitôt : Grbl freine encore
+    assert.ok(['running', 'finishing'].includes(c.job.state), c.job.state);
+    await waitFor(() => c.status.state === 'Run', 3000);
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(c.spindleHeld, false, 'la coupure automatique est abandonnée');
+    assert.ok(c.status.speed > 0, 'broche allumée');
+    await waitFor(() => c.job.state === 'done', 20000);
+  } finally { c.detach('fin'); }
+});

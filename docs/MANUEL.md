@@ -468,6 +468,7 @@ Tous les écrans ouverts voient et commandent **la même machine** en temps rée
 | « La carte ne répond pas » | Mauvais port ou mauvaise vitesse : essayez 115200 puis 250000. |
 | « Positions en pouces ($13=1) » | Copeau travaille en mm : envoyez `$13=0` dans la console. |
 | « Usinage en cours : commande refusée » | Normal pendant un usinage : utilisez Pause, Arrêter ou les corrections en direct. |
+| « La carte a redémarré pendant l'usinage », souvent quand la broche (re)démarre | Le démarrage du moteur fait chuter la tension ou envoie des parasites, et la carte redémarre : elle oublie sa position et arrête la broche. Copeau arrête le job. Remèdes : alimentation de la broche séparée de celle de la carte, câble USB court et blindé (avec ferrite), masses bien reliées, fils moteur éloignés des câbles de signal. Ensuite : **Origine**, vérifiez le zéro, puis **Reprise** à la ligne proposée. |
 | La page indique « Serveur perdu » | Le terminal où tourne Copeau a été fermé ou l'ordinateur est en veille. Relancez `npm start`, la page se reconnecte seule. |
 | Emblaser 2 : « La carte ne répond pas » | Le profil **Emblaser 2** est-il choisi ? LightBurn ou LaserGRBL sont-ils fermés ? Le câble USB transmet-il les données ? |
 | « Mode laser désactivé ($32=0) » | Laser Grbl : envoyez `$32=1` dans la console, sinon le laser reste allumé pendant les déplacements. |
