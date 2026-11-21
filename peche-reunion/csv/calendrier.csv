@@ -1,0 +1,8 @@
+﻿sujet;mois;type;fiabilite
+Bichiques (ouvert);"9; 10; 11; 12; 1; 2";reglementaire;officiel
+Capucins nains (ouvert);"2; 3; 4";reglementaire;officiel
+Langouste (ouvert);"4; 5; 6; 7; 8; 9; 10; 11";reglementaire;officiel
+Marlins, thons jaunes, dorades (pic);"11; 12; 1; 2; 3; 4";abondance;usage
+Thazards, germons (pic);"5; 6; 7; 8; 9";abondance;usage
+Saison cyclonique (prudence);"11; 12; 1; 2; 3; 4";securite;usage
+Houle australe forte (sud et ouest);"5; 6; 7; 8; 9";securite;usage

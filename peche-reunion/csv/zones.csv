@@ -1,0 +1,41 @@
+﻿id;nom;type;commune;secteur;lat;lon;description;reglementation;fiabilite;sources
+Z01;Lagon de l'Hermitage – La Saline;lagon;Saint-Paul;Ouest;-21.08;55.225;Plus grand lagon de l'île, dans la Réserve naturelle marine.;"RNMR. Pêche embarquée interdite dans les lagons ; pêche à pied interdite sur les plates-formes récifales hors pêches traditionnelles autorisées (carte DMSOI).";officiel;"S1; S5"
+Z02;Lagon de Saint-Leu;lagon;Saint-Leu;Ouest;-21.17;55.285;Lagon et platier dans la RNMR.;RNMR (voir Z01).;officiel;S1
+Z03;Étang-Salé (plage et platier);spot-littoral;L'Étang-Salé;Sud-Ouest;-21.27;55.335;"Extrémité sud de la RNMR ; plage de sable noir et platier.";RNMR jusqu'à l'Étang-Salé.;officiel;S1
+Z04;Lagon de Saint-Pierre;lagon;Saint-Pierre;Sud;-21.345;55.475;Petit lagon urbain hors RNMR.;Seules autorisées : pêche à pied de jour à la gaulette ou aux capucins nains, dans les 25 m du rivage sur fonds sableux. Interdiction de marcher sur les coraux.;officiel;S1
+Z05;Lagon de Grand Bois;lagon;Saint-Pierre;Sud;-21.38;55.535;Petit lagon du sud.;Mêmes règles que le lagon de Saint-Pierre (Z04).;officiel;S1
+Z06;Réserve naturelle marine de La Réunion (RNMR);reserve;Saint-Paul, Trois-Bassins, Saint-Leu, Les Avirons, L'Étang-Salé;Ouest;-21.15;55.26;Créée en 2007, environ 40 km de côte du Cap La Houssaye à L'Étang-Salé. Zonage : réglementation générale (niveau 1), protection renforcée (niveau 2, dont sous-zone 2B réservée aux pros licenciés), protection intégrale (niveau 3, aucun prélèvement).;Consulter la cartographie RNMR avant toute pêche. Chasse sous-marine interdite dans les passes. Foëne interdite. Pêches traditionnelles : arrêté 3416 (carte annuelle, quotas, marquage, vente interdite).;officiel;"S1; S3; S4; S5"
+Z07;Côte nord – Saint-Denis / Sainte-Marie;spot-littoral;Saint-Denis, Sainte-Marie;Nord;-20.875;55.49;"Galets, digues et sorties de rivières ; gaulette et lancer.";Pêche interdite dans les ports sauf autorisation.;usage;S1
+Z08;Côte est – Sainte-Suzanne / Saint-André / Saint-Benoît;spot-littoral;Sainte-Suzanne, Saint-André, Saint-Benoît;Est;-20.96;55.67;Côte de galets battue, nombreuses embouchures (bichiques), surfcasting et gaulette.;Respect des zones d'embouchures fermées aux bichiques.;usage;S6
+Z09;Sud sauvage – Saint-Joseph / Saint-Philippe;spot-littoral;Saint-Joseph, Saint-Philippe;Sud-Est;-21.37;55.7;"Falaises basaltiques et coulées (Grand Brûlé) ; gaulette et rockfishing sur carangues. Mer souvent forte.";"Règles générales ; prudence houle.";usage;
+Z10;Réserve de pêche de Sainte-Rose;zone-interdite;Sainte-Rose;Est;-21.13;55.8;Bande littorale protégée (annexe IV de l'arrêté 1743).;Pêche interdite sauf à la ligne depuis le bord. Pêche embarquée interdite.;officiel;"S1; S2"
+Z11;Côte ouest hors réserve – Le Port / La Possession / Cap La Houssaye;spot-littoral;Le Port, La Possession, Saint-Paul;Ouest;-20.98;55.27;Galets de la baie de Saint-Paul et pointes rocheuses.;Interdite le long de la Nouvelle route du littoral (Z14) et dans les ports.;officiel;S1
+Z12;Saint-Pierre – Terre Sainte / Petite-Île / Grande Anse;spot-littoral;Saint-Pierre, Petite-Île;Sud;-21.36;55.55;Platiers et anses du sud : zourites, gaulette, surfcasting.;Zourites interdites dans les lagons.;usage;S1
+Z13;Saint-Louis / Saint-Leu hors lagon – pointes rocheuses;spot-littoral;Saint-Louis, Saint-Leu;Sud-Ouest;-21.29;55.4;Pointes et platiers rocheux.;Vérifier la limite de la RNMR.;usage;
+Z14;Nouvelle route du littoral;zone-interdite;Saint-Denis – La Possession;Nord-Ouest;-20.91;55.37;Digue et viaduc entre Saint-Denis et La Possession.;Pêche interdite le long de l'ouvrage.;officiel;S1
+Z15;Bande littorale des 300 m (risque requin);zone-interdite;Toute l'île;Île entière;-21.11;55.53;Bande réglementée par arrêté préfectoral depuis 2013.;"Baignade et activités nautiques réglementées hors lagons et zones surveillées (arrêté n° 297 du 12/02/2025). Pêche sous-marine à ses risques ; ne pas garder les prises sur soi.";officiel;S8
+Z16;Bande des 2,5 milles nautiques;zone-interdite;Toute l'île;Île entière;-21.11;55.53;Bande autour de la côte.;Rejet de produits de la mer morts interdit (risque requin).;officiel;S1
+Z20;Rivière des Marsouins (embouchure);riviere;Saint-Benoît;Est;-21.03;55.72;Haut lieu de la pêche aux bichiques.;Arrêté bichiques : zone interdite au droit de l'embouchure si rivière listée.;usage;S6
+Z21;Rivière du Mât (embouchure);riviere;Saint-André / Bras-Panon;Est;-20.97;55.69;Grande rivière à bichiques.;Arrêté bichiques.;usage;S6
+Z22;Rivière des Roches (embouchure);riviere;Bras-Panon / Saint-Benoît;Est;-21.0;55.7;Bichiques, camarons en amont.;"Arrêté bichiques ; arrêté eau douce.";usage;"S6; S7"
+Z23;Rivière de l'Est (embouchure);riviere;Sainte-Rose;Est;-21.14;55.79;Rivière de l'est.;Arrêté bichiques.;usage;S6
+Z24;Rivière Saint-Étienne (embouchure);riviere;Saint-Louis / Saint-Pierre;Sud;-21.29;55.43;Principale rivière du sud-ouest.;Arrêté bichiques.;usage;S6
+Z25;Rivière Langevin;riviere;Saint-Joseph;Sud;-21.38;55.65;"Bichiques à l'embouchure ; eau douce en amont.";"Arrêté bichiques ; arrêté eau douce.";usage;"S6; S7"
+Z26;Rivière Sainte-Suzanne (embouchure);riviere;Sainte-Suzanne;Nord-Est;-20.905;55.61;Rivière du nord-est.;Arrêté bichiques.;usage;S6
+Z30;Grand Étang;plan-eau;Saint-Benoît;Est (Hauts);-21.1;55.63;Lac naturel d'altitude (~500 m).;"Arrêté eau douce annuel ; vérifier statut de pêche du site.";usage;S7
+Z31;Étang de Saint-Paul;plan-eau;Saint-Paul;Ouest;-21.0;55.285;Zone humide classée réserve naturelle nationale.;"Pêche très encadrée (réserve naturelle) ; se renseigner auprès du gestionnaire.";usage;
+Z32;Étang du Gol;plan-eau;Saint-Louis;Sud-Ouest;-21.275;55.38;Étang littoral.;Arrêté eau douce.;usage;S7
+Z33;Étang de Bois-Rouge;plan-eau;Saint-André;Est;-20.92;55.645;Étang littoral de l'est.;Arrêté eau douce.;usage;S7
+Z34;Lots de pêche à la truite ADAPAEF (rivières des Hauts);riviere;Hauts de l'île;Hauts;-21.12;55.5;Tronçons de 1re catégorie gérés par l'association agréée.;Carte + licence ADAPAEF obligatoires.;officiel;S7
+Z35;Mare à Poule d'Eau;plan-eau;Salazie;Cirque de Salazie;-21.06;55.53;Petit plan d'eau du cirque.;Arrêté eau douce.;usage;
+Z40;Tombant et fonds côtiers (0–3 milles);large;Toute l'île;Île entière;-21.2;55.2;Le plateau est très étroit : grands fonds rapidement atteints, d'où la pêche au gros proche de la côte.;Règles générales pêche embarquée.;usage;
+Z41;Grands fonds (200–500 m);large;Toute l'île;Île entière;-21.25;55.15;Zones de pêche aux vivaneaux profonds.;Moulinet électrique : WE et jours fériés, 800 W, déclaration.;officiel;S1
+Z42;Réseau de DCP ancrés;dcp;Toute l'île;Île entière;-21.3;55.25;Dispositifs de concentration de poissons ancrés autour de l'île (positions diffusées par le CRPMEM / DMSOI).;"Loisir : WE et jours fériés, rayon 1 mille ; pas de chasse sous-marine, pas de palangre verticale ni d'appât vivant. Pros : licence DCP.";officiel;"S1; S10"
+Z43;Zone économique exclusive (ZEE) Réunion;large;—;Large;-21.5;55.0;Zone d'activité des palangriers (espadon, thons).;CTOI, licences.;usage;
+Z44;Terres australes (Kerguelen, Crozet, Saint-Paul et Amsterdam);large;TAAF;Austral;-38.7;77.5;Pêcheries industrielles de légine et langouste armées depuis La Réunion.;Quotas TAAF.;usage;
+Z50;Port de Saint-Gilles;port;Saint-Paul;Ouest;-21.054;55.222;Port de plaisance et pêche, base de la pêche au gros (charters, concours).;Pêche interdite dans le port sauf autorisation.;officiel;S1
+Z51;Port de Saint-Pierre;port;Saint-Pierre;Sud;-21.342;55.472;Port de pêche et de plaisance du sud.;Pêche interdite dans le port sauf autorisation.;officiel;S1
+Z52;Port de Sainte-Marie;port;Sainte-Marie;Nord;-20.894;55.528;Port de plaisance et petite pêche du nord.;Pêche interdite dans le port sauf autorisation.;officiel;S1
+Z53;Le Port – Port Réunion (Port Ouest / Pointe des Galets);port;Le Port;Nord-Ouest;-20.935;55.29;Grand port : armements palangriers et australs, criée, plaisance à la Pointe des Galets.;Pêche interdite dans le port sauf autorisation.;officiel;S1
+Z54;Port de Saint-Leu;port;Saint-Leu;Ouest;-21.172;55.284;Petit port.;Pêche interdite dans le port sauf autorisation.;officiel;S1
+Z55;Port de Sainte-Rose;port;Sainte-Rose;Est;-21.128;55.795;Petit port de pêche de l'est.;Pêche interdite dans le port sauf autorisation.;officiel;S1

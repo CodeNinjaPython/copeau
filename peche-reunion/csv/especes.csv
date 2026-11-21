@@ -1,0 +1,49 @@
+﻿id;nom;nom_local;scientifique;groupe;milieu;statut;taille_min;periode;ciguatera;notes;fiabilite;sources
+E01;Thon jaune (albacore);thon jaune;Thunnus albacares;pélagique;mer;autorisee;> 10 cm (règle générale poissons);"Toute l'année ; pic été austral";False;Espèce phare de la traîne et des DCP.;officiel;S1
+E02;Thon germon;thon blanc;Thunnus alalunga;pélagique;mer;autorisee;> 10 cm;Hiver austral surtout;False;Ciblé par la palangre.;usage;S1
+E03;Listao (bonite à ventre rayé);bonite;Katsuwonus pelamis;pélagique;mer;autorisee;> 10 cm;Toute l'année;False;Sert aussi de vif pour le marlin.;usage;S1
+E04;Dorade coryphène;dorade;Coryphaena hippurus;pélagique;mer;autorisee;> 10 cm;Été austral (nov.–avr.);False;Très présente sous les objets flottants et DCP.;usage;S1
+E05;Thazard bâtard (wahoo);thazard;Acanthocybium solandri;pélagique;mer;autorisee;> 10 cm;Plutôt hiver austral;False;Bas de ligne acier conseillé.;usage;S1
+E06;Marlin bleu;marlin;Makaira nigricans;porte-épée;mer;autorisee;> 10 cm;Été austral;False;Le no-kill (marquage-relâche) est largement pratiqué en compétition.;usage;S1
+E07;Espadon;espadon;Xiphias gladius;porte-épée;mer;autorisee;Selon réglementation CTOI pour les pros;Toute l'année;False;Cible principale historique des palangriers réunionnais.;usage;S9
+E08;Voilier de l'Indo-Pacifique;voilier;Istiophorus platypterus;porte-épée;mer;autorisee;> 10 cm;Été austral;False;;usage;
+E10;Carangues (dont carangue grosse tête GT);carangue;Caranx ignobilis, C. melampygus…;côtier;mer;autorisee;> 10 cm;Toute l'année;True;"Les très gros individus peuvent être ciguatoxiques ; prudence.";usage;S1
+E11;Vivaneaux profonds (rouges);rouge, vivano;Etelis spp., Pristipomoides spp.;fond;mer;autorisee;> 10 cm;Toute l'année;False;Pêchés entre 150 et 500 m.;usage;S1
+E12;Vivaneau chien rouge;vara-vara;Lutjanus bohar;fond;mer;reglementee;—;—;True;"Espèce classiquement citée parmi les poissons à risque de ciguatera ; vérifier l'article « poissons toxiques » de l'arrêté 1743.";usage;S2
+E13;Job (vivaneau vert);job;Aprion virescens;fond;mer;autorisee;> 10 cm;Toute l'année;False;;usage;S1
+E14;Mérous;vieille, macabit;Epinephelus spp. (dont E. merra « macabit »);récif;mer;autorisee;> 10 cm (vérifier tailles spécifiques arrêté 1743);Toute l'année;True;"Les grands mérous sont vulnérables ; gros spécimens à risque ciguatera.";usage;S2
+E15;Capitaine (empereur);capitaine;Lethrinus spp.;récif;mer;autorisee;> 10 cm;Toute l'année;False;;usage;S1
+E16;Poissons-perroquets;perroquet;Scaridae;récif;mer;autorisee;> 10 cm;Toute l'année;True;"Rôle clé pour le récif ; éviter les prélèvements en lagon.";usage;
+E17;Rougets / capucins adultes;rouget;Mullidae;côtier;mer;autorisee;> 10 cm;Toute l'année;False;Cible classique de la gaulette.;usage;S1
+E18;Mulets;mulet;Mugilidae;côtier;mer / estuaire;autorisee;> 10 cm;Toute l'année;False;;usage;S1
+E19;Zoreilles (poissons de roche);zoreille;Kyphosidae / divers;côtier;mer;autorisee;> 10 cm;Toute l'année;False;Appellation créole variable selon les secteurs — à préciser localement.;usage;
+E20;Barracuda;bécune;Sphyraena spp.;côtier;mer;autorisee;> 10 cm;Toute l'année;True;Grands individus (S. barracuda) à risque ciguatera.;usage;
+E30;Langouste;langouste;Panulirus spp.;crustacé;mer;limitee;> 23 cm;Pêche autorisée du 1er avril au 30 novembre;False;Femelles grainées (avec œufs) interdites. Marquage : couper la nageoire caudale.;officiel;S1
+E31;Crabe girafe;crabe girafe;Ranina ranina;crustacé;mer – fonds sableux;limitee;—;Toute l'année;False;Pêche seulement en dehors des lagons.;officiel;S1
+E32;Poulpe;zourite;Octopus sp.;céphalopode;mer – platiers;limitee;—;Selon arrêté RNMR;False;"Pêche interdite dans les lagons ; réglementation spécifique dans la Réserve marine.";officiel;"S1; S3"
+E33;Moules;moule;—;coquillage;mer – rochers;autorisee;> 4 cm;Toute l'année;False;;officiel;S1
+E40;Bichique (post-larve de cabot bouche-ronde);bichique;Sicyopterus lagocephalus, Cotylopus acutipinnis;amphidrome;embouchures;limitee;—;1er septembre – 28 février;False;"Ressource en déclin, « caviar péi » vendu très cher ; contrôles renforcés (OFB, DMSOI).";officiel;"S1; S6"
+E41;Capucin nain (juvénile);capucin;Mulloidichthys flavolineatus;côtier;mer – littoral sableux;limitee;—;1er février – 30 avril, 5 h–9 h, ven./sam./dim.;False;"Pêche interdite les jours fériés ; réglementation spécifique dans la Réserve marine.";officiel;"S1; S3"
+E50;Tilapia;tilapia;Oreochromis spp.;eau douce introduit;étangs, rivières;autorisee;Pas de taille minimale (projet 2020);Selon arrêté;False;Espèce exotique.;officiel;S7
+E51;Carpe;carpe;Cyprinus carpio;eau douce introduit;étangs;autorisee;Selon arrêté;Selon arrêté;False;;usage;S7
+E52;Black-bass;black-bass;Micropterus salmoides;eau douce introduit;retenues, étangs;autorisee;Selon arrêté;Selon arrêté;False;;usage;S7
+E53;Truite arc-en-ciel;truite;Oncorhynchus mykiss;eau douce introduit;rivières de 1re catégorie (Hauts);reglementee;Selon arrêté;Selon arrêté;False;Seule espèce autorisée en 1re catégorie, uniquement dans les lots ADAPAEF (carte + licence).;officiel;S7
+E54;Poisson plat (doule de roche);poisson plat;Kuhlia rupestris;eau douce indigène;rivières;reglementee;23 cm (note 2020);Selon arrêté;False;4 prises par jour (note de présentation 2020).;officiel;S7
+E55;Chitte;chitte;Agonostomus telfairii;eau douce indigène;rivières;reglementee;23 cm (note 2020);Selon arrêté;False;4 prises par jour (note de présentation 2020).;officiel;S7
+E56;Camaron;camaron;Macrobrachium spp.;crustacé d'eau douce;rivières;reglementee;Selon arrêté;Selon arrêté;False;Ressource surexploitée historiquement.;usage;S7
+E57;Chevaquine (petites crevettes d'eau douce);chevaquine;Atyidae / Caridina spp.;crustacé d'eau douce;rivières;reglementee;"Aucune (projet 2020) ; ½ litre max.";Selon arrêté;False;;officiel;S7
+E58;Cabots bouche-ronde adultes;cabot;Sicyopterus lagocephalus, Cotylopus acutipinnis;eau douce indigène;rivières;interdite;—;—;False;Certains cabots adultes interdits à la pêche en 2e catégorie.;officiel;S7
+E59;Anguilles;anguille;Anguilla spp.;eau douce indigène;rivières, bassins;reglementee;Selon arrêté;Selon arrêté;False;;usage;S7
+E60;Légine australe;légine;Dissostichus eleginoides;fond (austral);mer – TAAF;reglementee;Quotas TAAF;Campagnes;False;Pêche industrielle basée au Port.;usage;
+E61;Langouste de Saint-Paul;langouste australe;Jasus paulensis;crustacé (austral);mer – Saint-Paul et Amsterdam;reglementee;Quotas TAAF;Campagnes;False;;usage;
+E70;Requin bouledogue;requin bouledogue;Carcharhinus leucas;requin;mer – côtier;reglementee;—;—;True;Commercialisation interdite à La Réunion en raison du risque ciguatérique (à vérifier). Ciblé par les pêches de prévention.;usage;
+E71;Requin tigre;requin tigre;Galeocerdo cuvier;requin;mer;reglementee;—;—;True;Ciblé par les pêches de prévention.;usage;
+E72;Requin pointe blanche;pointe blanche;Carcharhinus albimarginatus (probable);requin;mer;interdite;—;Interdit toute l'année;False;Listé comme espèce interdite à la pêche (guide 2024).;officiel;S1
+E73;Requin pointe noire de récif;pointe noire;Carcharhinus melanopterus;requin;mer – récif;interdite;—;Interdit toute l'année;False;;officiel;S1
+E74;Requin « dagsit »;dagsit;Nom tel qu'écrit dans le guide 2024 (identification à confirmer);requin;mer;interdite;—;Interdit toute l'année;False;;officiel;S1
+E75;Requin corail;requin corail;Triaenodon obesus (probable);requin;mer – récif;interdite;—;Interdit toute l'année;False;;officiel;S1
+E76;Requin nourrice fauve;nourrice;Nebrius ferrugineus;requin;mer – récif;interdite;—;Interdit toute l'année;False;;officiel;S1
+E80;Tortues marines;tortue;Chelonia mydas, Eretmochelys imbricata…;reptile;mer;protegee;—;Protection intégrale;False;"Espèces protégées ; capture, détention et dérangement interdits.";usage;
+E81;Coquillages vivants, coraux (morts ou vivants);coquillages, coraux;—;invertébrés;mer;interdite;—;Interdit;False;Ramassage interdit.;officiel;S1
+E82;Œufs de poissons et de crustacés;œufs;—;—;mer;interdite;—;Interdit;False;;officiel;S1
+E83;Poissons venimeux et vénéneux (rascasses, poissons-ballons…);laf, coffre, ballon;Scorpaenidae, Tetraodontidae…;—;mer;interdite;—;Interdit;False;Le guide illustre la catégorie par un poisson-scorpion (rascasse volante).;officiel;S1

@@ -1,0 +1,27 @@
+﻿id;theme;public;regle;fiabilite;sources
+R01;Général;loisir;Pêche de loisir interdite à bord d'une embarcation non immatriculée.;officiel;S1
+R02;Général;loisir;"Vente des produits de la pêche de loisir interdite ; consommation familiale raisonnable.";officiel;S1
+R03;Marquage;loisir;Marquer chaque prise en coupant la partie inférieure de la nageoire caudale (crustacés : partie de la queue) sans empêcher la mesure.;officiel;S1
+R04;Tailles;loisir;Poissons : plus de 10 cm. Moules : plus de 4 cm. Langouste : plus de 23 cm. Tailles spécifiques supplémentaires possibles dans l'arrêté 1743.;officiel;"S1; S2"
+R05;Engins – embarqué;loisir;"Lignes gréées : 12 hameçons maximum simultanément ; une épuisette ; une foëne ; palangre 12 hameçons simples max. ; 2 nasses, 2 casiers, 20 balances. Immatriculation marquée sur les engins.";officiel;S1
+R06;Engins – bord;loisir;À pied : lignes (gaulette…), une épuisette, vouve exclusivement pour les bichiques, filet exclusivement pour les capucins nains.;officiel;S1
+R07;Engins – sous-marine;loisir;"Plus de 16 ans, en apnée ou à la nage : un fusil-harpon ; foëne sauf dans la Réserve marine. Pêche en bouteilles interdite.";officiel;S1
+R08;Engins interdits;loisir;Tout autre engin, y compris drones aériens et nautiques, canons, filets (hors capucins nains), attraction par la lumière.;officiel;S1
+R09;Moulinet électrique;loisir;"Samedi, dimanche, jours fériés ; 1 par navire ; 800 W max ; déclaration du moulinet à la DMSOI ; déclaration annuelle des captures obligatoire même à zéro.";officiel;S1
+R10;DCP;loisir;"Samedi, dimanche et jours fériés ; rayon de 1 mille nautique ; chasse sous-marine interdite ; palangre verticale et appât vivant interdits.";officiel;S1
+R11;DCP;pro;Licence CRPMEM spécifique pour pêcher autour des DCP depuis le 1er janvier 2021.;officiel;S10
+R12;Zones;tous;Pêche embarquée interdite dans la Réserve de Sainte-Rose et dans les lagons.;officiel;S1
+R13;Zones;tous;Pêche interdite dans les ports sauf autorisation, et le long de la Nouvelle route du littoral.;officiel;S1
+R14;Zones;loisir;"Lagons de Saint-Pierre et Grand Bois : uniquement pêche à pied de jour à la gaulette ou aux capucins nains, dans les 25 m du rivage sur fonds sableux ; ne pas marcher sur les coraux.";officiel;S1
+R15;RNMR;tous;Trois niveaux : réglementation générale (1), protection renforcée (2, sous-zone 2B réservée aux pros licence RNM), protection intégrale (3). Chasse sous-marine interdite dans les passes.;officiel;"S4; S5"
+R16;RNMR;loisir;Pêches traditionnelles (gaulette, capucins nains, zourites) : carte annuelle nominative non cessible délivrée par la DMSOI, quotas, marquage, vente interdite. Gaulette interdite les jours fériés.;officiel;S3
+R17;Saisons;tous;Langouste : 1er avril – 30 novembre, femelles grainées interdites.;officiel;S1
+R18;Saisons;loisir;Capucins nains : 1er février – 30 avril, 5 h–9 h, vendredi, samedi, dimanche, hors jours fériés.;officiel;S1
+R19;Saisons;tous;"Bichiques : 1er septembre – 28 février ; pas de pêche de nuit (non-pros) ; zones d'embouchures interdites ; canal libre obligatoire.";officiel;"S1; S6"
+R20;Espèces interdites;tous;"Requins pointe blanche, pointe noire de récif, dagsit, corail, nourrice fauve ; coquillages vivants ; œufs de poissons et crustacés ; poissons venimeux et vénéneux ; coraux morts ou vivants.";officiel;S1
+R21;Risque requin;tous;Rejet de produits de la mer morts interdit dans les 2,5 milles autour de la côte.;officiel;S1
+R22;Risque requin;tous;"Bande des 300 m : baignade et activités nautiques réglementées hors lagons et zones surveillées (arrêté 297 du 12/02/2025) ; chasseurs : déposer les prises au plus vite sur la bouée ou le navire.";officiel;S8
+R23;Bord;loisir;Interdit de détenir à bord tout animal domestique, vivant ou mort.;officiel;S1
+R24;Déclaration;loisir;Déclaration des captures de chaque sortie en ligne encouragée (obligatoire avec moulinet électrique).;officiel;"S1; S12"
+R25;Eau douce;loisir;Arrêté préfectoral annuel : catégories piscicoles, espèces interdites, tailles, quotas, heures. Truite uniquement en lots ADAPAEF avec carte et licence.;officiel;S7
+R26;Sécurité;tous;Secours en mer : CROSS Sud océan Indien – VHF canal 16 – téléphone 196.;officiel;S1

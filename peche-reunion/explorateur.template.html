@@ -1,0 +1,238 @@
+<title>Pêche à La Réunion</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout : en-tête « carte marine » + onglets ; chaque onglet = liste filtrable de fiches, carte schématique pour les zones */
+:root {
+  --bg: #f3f6f7; --surface: #ffffff; --fg: #13232b; --muted: #55666e; --line: #d5dfe2;
+  --accent: #0b6f73; --accent-soft: #d8eeee; --basalt: #1d2d35;
+  --ok: #2c7a3f; --ok-soft: #e1f1e4; --warn: #9a5b00; --warn-soft: #fbeed6; --bad: #b4322a; --bad-soft: #f8e1df;
+  --info: #2d5b9a; --info-soft: #e2ebf7; --sea: #cfe3ea; --land: #e6e2d6;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e171c; --surface: #15222a; --fg: #e3ecef; --muted: #93a6ae; --line: #284049;
+  --accent: #4fc1bf; --accent-soft: #143a3d; --basalt: #0a1115;
+  --ok: #7fcf8d; --ok-soft: #173322; --warn: #f0b860; --warn-soft: #3a2b12; --bad: #f08b80; --bad-soft: #3d1c1a;
+  --info: #8fb4ec; --info-soft: #1a2a40; --sea: #12303a; --land: #2a3236; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e171c; --surface: #15222a; --fg: #e3ecef; --muted: #93a6ae; --line: #284049;
+  --accent: #4fc1bf; --accent-soft: #143a3d; --basalt: #0a1115;
+  --ok: #7fcf8d; --ok-soft: #173322; --warn: #f0b860; --warn-soft: #3a2b12; --bad: #f08b80; --bad-soft: #3d1c1a;
+  --info: #8fb4ec; --info-soft: #1a2a40; --sea: #12303a; --land: #2a3236; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 16px/1.5 var(--f-body); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header.top { background: var(--basalt); color: #e8f1f2; margin-top: calc(-1 * env(safe-area-inset-top, 0px)); padding-top: env(safe-area-inset-top, 0px); }
+header.top .wrap { padding-block: 28px 20px; display: grid; gap: 14px }
+.coords { font: 500 12px var(--f-mono); letter-spacing: .08em; color: #8fc9c7; text-transform: uppercase }
+h1 { font: 700 clamp(30px, 5vw, 46px)/1.05 var(--f-display); margin: 0; text-wrap: balance }
+.lede { max-width: 68ch; margin: 0; color: #c3d3d6 }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 22px; font: 13px var(--f-mono); color: #a9bfc3 }
+.stats b { color: #fff; font-weight: 500; font-variant-numeric: tabular-nums }
+nav.tabs { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line) }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--basalt) }
+nav.tabs .wrap { display: flex; gap: 4px; overflow-x: auto; padding-block: 6px }
+nav.tabs button { font: 600 14px var(--f-body); background: none; border: 0; color: var(--muted); padding: 8px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap }
+nav.tabs button[aria-selected="true"] { color: var(--accent); background: var(--accent-soft) }
+nav.tabs button:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+main .wrap { padding-block: 22px 60px; display: grid; gap: 18px }
+.tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center }
+.tools input, .tools select { font: 15px var(--f-body); padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--fg) }
+.tools input { flex: 1 1 260px; min-width: 0 }
+.count { font: 13px var(--f-mono); color: var(--muted) }
+.note { font-size: 14px; color: var(--muted); max-width: 80ch; margin: 0 }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 8px; align-content: start; min-width: 0 }
+.card h3 { font: 700 18px/1.2 var(--f-display); margin: 0; text-wrap: balance }
+.card .sub { font-size: 14px; color: var(--muted); margin-top: -4px }
+.card p { margin: 0; font-size: 15px }
+.kv { display: grid; grid-template-columns: 7.5em 1fr; gap: 4px 10px; font-size: 14px }
+.kv dt { color: var(--muted) } .kv dd { margin: 0; min-width: 0 }
+.reg { background: var(--info-soft); border-radius: 6px; padding: 8px 10px; font-size: 14px }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+.id { font: 12px var(--f-mono); color: var(--muted) }
+.pill { font: 600 12px var(--f-body); padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); letter-spacing: .02em }
+.pill.officiel { background: var(--ok-soft); color: var(--ok) }
+.pill.usage { background: var(--warn-soft); color: var(--warn) }
+.pill.interdite, .pill.protegee { background: var(--bad-soft); color: var(--bad) }
+.pill.limitee, .pill.reglementee { background: var(--warn-soft); color: var(--warn) }
+.pill.autorisee { background: var(--ok-soft); color: var(--ok) }
+.pill.cig { background: var(--bad-soft); color: var(--bad) }
+.chips { display: flex; flex-wrap: wrap; gap: 6px }
+.chip { font: 13px var(--f-body); border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 6px; padding: 2px 8px; cursor: pointer }
+.chip:hover { border-color: var(--accent); color: var(--accent) }
+.src { font: 12px var(--f-mono) } .src a { color: var(--accent) }
+.flash { animation: flash 1.4s ease-out } @keyframes flash { from { box-shadow: 0 0 0 3px var(--accent) } to { box-shadow: 0 0 0 0 transparent } }
+@media (prefers-reduced-motion: reduce) { .flash { animation: none } }
+.mapbox { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 8px }
+.mapbox svg { width: 100%; height: auto; max-height: 520px; display: block }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted) }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; background: var(--c); vertical-align: -1px }
+table { border-collapse: collapse; width: 100%; font-size: 14px; background: var(--surface) }
+.tablebox { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top }
+th { font: 600 13px var(--f-body); color: var(--muted); background: var(--bg); position: sticky; top: 0 }
+td.m { text-align: center; font-variant-numeric: tabular-nums; min-width: 34px; padding: 6px 2px }
+td.on { background: var(--accent); color: var(--surface) }
+td.on.securite { background: var(--bad) } td.on.abondance { background: var(--info) }
+.empty { color: var(--muted); padding: 24px; text-align: center }
+</style>
+
+<header class="top"><div class="wrap">
+  <div class="coords">21°07′ S · 55°32′ E · océan Indien</div>
+  <h1>Pêche à La Réunion</h1>
+  <p class="lede">Techniques, espèces, zones et réglementation réunies en une base consultable. Chaque fiche indique si l'information vient d'un texte officiel ou de l'usage local, et cite ses sources.</p>
+  <div class="stats" id="stats"></div>
+</div></header>
+
+<nav class="tabs" aria-label="Sections"><div class="wrap" role="tablist" id="tabs"></div></nav>
+
+<main><div class="wrap" id="view"></div></main>
+
+<script>
+const DB = /*DATA*/null;
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const byId = {}; ["techniques", "especes", "zones", "sources"].forEach(k => DB[k].forEach(r => byId[r.id] = { ...r, _t: k }));
+const norm = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const FIAB = { officiel: "Source officielle", usage: "Usage local · à vérifier" };
+const STATUT = { autorisee: "Autorisée", limitee: "Limitée", reglementee: "Réglementée", interdite: "Interdite", protegee: "Protégée" };
+const CAT = { "loisir-embarque": "Loisir embarqué", "loisir-bord": "Loisir du bord", "sous-marine": "Chasse sous-marine", traditionnelle: "Traditionnelle", "eau-douce": "Eau douce", professionnelle: "Professionnelle" };
+const ZTYPE = { lagon: "Lagon", reserve: "Réserve", "spot-littoral": "Littoral", "zone-interdite": "Zone interdite / réglementée", riviere: "Rivière", "plan-eau": "Plan d'eau", port: "Port", large: "Large", dcp: "DCP" };
+const ZCOL = { lagon: "#2aa5a0", reserve: "#2c7a3f", "spot-littoral": "#d08a2e", "zone-interdite": "#c0392b", riviere: "#3c74c4", "plan-eau": "#6b5bc4", port: "#55666e", large: "#1d4f6e", dcp: "#1d4f6e" };
+const MOIS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+
+const fiab = f => `<span class="pill ${f}">${FIAB[f] || f}</span>`;
+const srcs = ids => ids?.length ? `<div class="src">Sources : ${ids.map(i => { const s = byId[i]; return s ? `<a href="${esc(s.url)}" target="_blank" rel="noopener" title="${esc(s.titre)}">${i}</a>` : i; }).join(", ")}</div>` : `<div class="src">Sans source écrite</div>`;
+const chips = ids => ids?.length ? `<div class="chips">${ids.map(i => byId[i] ? `<button class="chip" data-go="${i}">${esc(byId[i].nom)}</button>` : "").join("")}</div>` : "";
+const usedBy = (field, id) => DB.techniques.filter(t => t[field].includes(id)).map(t => t.id);
+
+const TABS = [
+  { id: "techniques", label: "Techniques" }, { id: "especes", label: "Espèces" }, { id: "zones", label: "Zones" },
+  { id: "regles", label: "Réglementation" }, { id: "calendrier", label: "Calendrier" }, { id: "glossaire", label: "Glossaire" }, { id: "sources", label: "Sources" },
+];
+let state = { tab: "techniques", q: "", f: "" };
+try { const s = JSON.parse(localStorage.getItem("peche974") || "{}"); if (s.tab) state.tab = s.tab; } catch (e) {}
+if (TABS.some(t => t.id === location.hash.slice(1))) state.tab = location.hash.slice(1);
+
+$("#stats").innerHTML = [["techniques", DB.techniques.length], ["espèces", DB.especes.length], ["zones", DB.zones.length], ["règles", DB.regles.length], ["sources", DB.sources.length]]
+  .map(([k, v]) => `<span><b>${v}</b> ${k}</span>`).join("") + `<span>mise à jour <b>${DB.mise_a_jour}</b></span>`;
+
+function renderTabs() {
+  $("#tabs").innerHTML = TABS.map(t => `<button role="tab" aria-selected="${t.id === state.tab}" data-tab="${t.id}">${t.label}</button>`).join("");
+}
+function tools(opts, ph) {
+  return `<div class="tools"><input id="q" type="search" placeholder="${ph}" value="${esc(state.q)}" aria-label="Rechercher">
+  ${opts ? `<select id="f" aria-label="Filtrer"><option value="">Tout</option>${opts.map(([v, l]) => `<option value="${v}" ${state.f === v ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
+  <span class="count" id="count"></span></div>`;
+}
+const match = (r, keys) => !state.q || norm(keys.map(k => Array.isArray(r[k]) ? r[k].join(" ") : r[k]).join(" ")).includes(norm(state.q));
+
+const views = {
+  techniques() {
+    const rows = DB.techniques.filter(t => (!state.f || t.categorie === state.f) && match(t, ["nom", "nom_local", "description", "materiel", "reglementation", "milieu"]));
+    return [tools(Object.entries(CAT), "Rechercher une technique, un engin, une règle…"), rows.length,
+      `<div class="grid">${rows.map(t => `<article class="card" id="c-${t.id}">
+        <div class="meta"><span class="pill">${CAT[t.categorie]}</span>${fiab(t.fiabilite)}<span class="id">${t.id}</span></div>
+        <h3>${esc(t.nom)}</h3>${t.nom_local ? `<div class="sub">« ${esc(t.nom_local)} » · ${esc(t.milieu)}</div>` : ""}
+        <p>${esc(t.description)}</p>
+        <dl class="kv"><dt>Matériel</dt><dd>${esc(t.materiel)}</dd><dt>Saison</dt><dd>${esc(t.saison)}</dd></dl>
+        <div class="reg"><b>Règles :</b> ${esc(t.reglementation)}</div>
+        ${t.especes.length ? `<div class="sub">Espèces visées</div>${chips(t.especes)}` : ""}
+        ${t.zones.length ? `<div class="sub">Zones</div>${chips(t.zones)}` : ""}
+        ${srcs(t.sources)}</article>`).join("")}</div>`];
+  },
+  especes() {
+    const rows = DB.especes.filter(e => (!state.f || e.statut === state.f || (state.f === "cig" && e.ciguatera)) && match(e, ["nom", "nom_local", "scientifique", "groupe", "notes", "milieu"]));
+    return [tools([...Object.entries(STATUT), ["cig", "Risque ciguatera"]], "Nom commun, créole ou scientifique…"), rows.length,
+      `<div class="grid">${rows.map(e => `<article class="card" id="c-${e.id}">
+        <div class="meta"><span class="pill ${e.statut}">${STATUT[e.statut]}</span>${e.ciguatera ? `<span class="pill cig">Ciguatera</span>` : ""}${fiab(e.fiabilite)}<span class="id">${e.id}</span></div>
+        <h3>${esc(e.nom)}</h3><div class="sub"><i>${esc(e.scientifique)}</i> · créole : ${esc(e.nom_local)}</div>
+        <dl class="kv"><dt>Groupe</dt><dd>${esc(e.groupe)}</dd><dt>Milieu</dt><dd>${esc(e.milieu)}</dd><dt>Taille min.</dt><dd>${esc(e.taille_min)}</dd><dt>Période</dt><dd>${esc(e.periode)}</dd></dl>
+        ${e.notes ? `<p>${esc(e.notes)}</p>` : ""}
+        ${usedBy("especes", e.id).length ? `<div class="sub">Techniques</div>${chips(usedBy("especes", e.id))}` : ""}
+        ${srcs(e.sources)}</article>`).join("")}</div>`];
+  },
+  zones() {
+    const rows = DB.zones.filter(z => (!state.f || z.type === state.f) && match(z, ["nom", "commune", "secteur", "description", "reglementation"]));
+    return [tools(Object.entries(ZTYPE), "Commune, rivière, lagon, port…"), rows.length,
+      mapSvg(rows) + `<div class="grid">${rows.map(z => `<article class="card" id="c-${z.id}">
+        <div class="meta"><span class="pill" style="background:${ZCOL[z.type]}22;color:${ZCOL[z.type]}">${ZTYPE[z.type]}</span>${fiab(z.fiabilite)}<span class="id">${z.id}</span></div>
+        <h3>${esc(z.nom)}</h3><div class="sub">${esc(z.commune)} · ${esc(z.secteur)}</div>
+        <p>${esc(z.description)}</p><div class="reg"><b>Règles :</b> ${esc(z.reglementation)}</div>
+        ${usedBy("zones", z.id).length ? `<div class="sub">Techniques pratiquées</div>${chips(usedBy("zones", z.id))}` : ""}
+        ${srcs(z.sources)}</article>`).join("")}</div>`];
+  },
+  regles() {
+    const themes = [...new Set(DB.regles.map(r => r.theme))];
+    const rows = DB.regles.filter(r => (!state.f || r.theme === state.f) && match(r, ["theme", "regle", "public"]));
+    return [tools(themes.map(t => [t, t]), "Rechercher dans la réglementation…"), rows.length,
+      `<p class="note">Synthèse des textes en vigueur connus au ${DB.mise_a_jour}. Avant de pêcher, vérifiez la version à jour des arrêtés sur le site de la DMSOI : les règles changent (bichiques en cours de révision, arrêté eau douce annuel).</p>
+      <div class="tablebox"><table><thead><tr><th>Réf.</th><th>Thème</th><th>Public</th><th>Règle</th><th>Sources</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td class="id">${r.id}</td><td>${esc(r.theme)}</td><td>${esc(r.public)}</td><td>${esc(r.regle)}</td><td>${srcs(r.sources).replace("Sources : ", "")}</td></tr>`).join("")}</tbody></table></div>`];
+  },
+  calendrier() {
+    return [null, null, `<p class="note">Vert sarcelle : périodes réglementaires d'ouverture. Bleu : pics d'abondance observés par les pêcheurs (usage local). Rouge : périodes de vigilance météo-marine.</p>
+      <div class="tablebox"><table><thead><tr><th>Sujet</th>${MOIS.map(m => `<th class="m" style="text-align:center">${m}</th>`).join("")}<th>Fiabilité</th></tr></thead><tbody>
+      ${DB.calendrier.map(c => `<tr><td>${esc(c.sujet)}</td>${MOIS.map((m, i) => `<td class="m ${c.mois.includes(i + 1) ? "on " + c.type : ""}">${c.mois.includes(i + 1) ? "●" : ""}</td>`).join("")}<td>${fiab(c.fiabilite)}</td></tr>`).join("")}
+      </tbody></table></div>`];
+  },
+  glossaire() {
+    const rows = DB.glossaire.filter(g => match(g, ["terme", "definition"]));
+    return [tools(null, "Terme créole ou sigle…"), rows.length, `<div class="tablebox"><table><tbody>${rows.map(g => `<tr><th style="position:static;width:9em">${esc(g.terme)}</th><td>${esc(g.definition)}</td></tr>`).join("")}</tbody></table></div>`];
+  },
+  sources() {
+    return [null, null, `<div class="tablebox"><table><thead><tr><th>Réf.</th><th>Document</th><th>Éditeur</th><th>Année</th></tr></thead><tbody>
+      ${DB.sources.map(s => `<tr id="c-${s.id}"><td class="id">${s.id}</td><td><a href="${esc(s.url)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(s.titre)}</a></td><td>${esc(s.editeur)}</td><td>${s.annee}</td></tr>`).join("")}</tbody></table></div>
+      <h3 style="font:700 18px var(--f-display);margin:8px 0 0">Chiffres clés</h3>
+      <div class="tablebox"><table><thead><tr><th>Indicateur</th><th>Valeur</th><th>Année</th><th>Source</th></tr></thead><tbody>
+      ${DB.chiffres.map(c => `<tr><td>${esc(c.indicateur)}</td><td style="font-variant-numeric:tabular-nums">${esc(c.valeur)}</td><td>${c.annee}</td><td class="id">${c.sources.join(", ")}</td></tr>`).join("")}</tbody></table></div>`];
+  },
+};
+
+// Tracé schématique de l'île (points côtiers approximatifs)
+const COAST = [[-20.878,55.448],[-20.89,55.53],[-20.905,55.61],[-20.94,55.67],[-21.03,55.725],[-21.08,55.76],[-21.13,55.80],[-21.22,55.83],[-21.32,55.82],[-21.365,55.77],[-21.385,55.70],[-21.385,55.62],[-21.388,55.54],[-21.35,55.475],[-21.30,55.41],[-21.27,55.335],[-21.20,55.30],[-21.17,55.283],[-21.10,55.24],[-21.055,55.218],[-21.02,55.235],[-21.00,55.268],[-20.95,55.285],[-20.925,55.34],[-20.89,55.39]];
+function mapSvg(rows) {
+  const W = 640, H = 560, la0 = -20.84, la1 = -21.42, lo0 = 55.19, lo1 = 55.86;
+  const X = lo => 20 + (lo - lo0) / (lo1 - lo0) * (W - 40), Y = la => 20 + (la - la0) / (la1 - la0) * (H - 40);
+  const pts = rows.filter(z => z.lat > -21.42 && z.lat < -20.84 && !["Z15", "Z16", "Z40", "Z41", "Z42", "Z06"].includes(z.id));
+  const types = [...new Set(pts.map(z => z.type))];
+  return `<div class="mapbox"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Carte schématique des zones">
+    <rect width="${W}" height="${H}" rx="8" fill="var(--sea)"/>
+    <polygon points="${COAST.map(([a, o]) => X(o).toFixed(1) + "," + Y(a).toFixed(1)).join(" ")}" fill="var(--land)" stroke="var(--muted)" stroke-width="1" stroke-linejoin="round"/>
+    <polyline points="${[[-21.02,55.235],[-21.055,55.218],[-21.10,55.24],[-21.17,55.283],[-21.20,55.30],[-21.27,55.335]].map(([a, o]) => X(o - .012).toFixed(1) + "," + Y(a).toFixed(1)).join(" ")}" fill="none" stroke="#2c7a3f" stroke-width="5" stroke-opacity=".55" stroke-linecap="round"><title>Réserve naturelle marine</title></polyline>
+    <text x="${X(55.53)}" y="${Y(-21.12)}" text-anchor="middle" font-family="var(--f-display)" font-size="15" fill="var(--muted)" opacity=".7">LA RÉUNION</text>
+    <text x="${X(55.22)}" y="${Y(-21.37)}" font-family="var(--f-mono)" font-size="11" fill="var(--muted)">Tracé schématique</text>
+    ${pts.map(z => `<g class="pt" data-go="${z.id}" style="cursor:pointer"><circle cx="${X(z.lon).toFixed(1)}" cy="${Y(z.lat).toFixed(1)}" r="7" fill="${ZCOL[z.type]}" stroke="var(--surface)" stroke-width="2"/><title>${esc(z.nom)}</title></g>`).join("")}
+  </svg><div class="legend">${types.map(t => `<span style="--c:${ZCOL[t]}">${ZTYPE[t]}</span>`).join("")}<span style="--c:#2c7a3f">Bande verte : Réserve marine</span></div></div>`;
+}
+
+function render(keepFocus) {
+  renderTabs();
+  const [tl, n, body] = views[state.tab]();
+  $("#view").innerHTML = (tl || "") + (body || "") || `<div class="empty">Aucun résultat.</div>`;
+  if (n !== null && $("#count")) $("#count").textContent = `${n} résultat${n > 1 ? "s" : ""}`;
+  if (n === 0) $("#view").insertAdjacentHTML("beforeend", `<div class="empty">Aucun résultat pour cette recherche.</div>`);
+  if (keepFocus && $("#q")) { const q = $("#q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
+  try { localStorage.setItem("peche974", JSON.stringify({ tab: state.tab })); } catch (e) {}
+}
+document.addEventListener("click", e => {
+  const tab = e.target.closest("[data-tab]");
+  if (tab) { state = { tab: tab.dataset.tab, q: "", f: "" }; history.replaceState(null, "", "#" + state.tab); render(); return; }
+  const go = e.target.closest("[data-go]");
+  if (go) {
+    const r = byId[go.dataset.go]; if (!r) return;
+    state = { tab: r._t, q: "", f: "" }; history.replaceState(null, "", "#" + state.tab); render();
+    const el = document.getElementById("c-" + r.id);
+    if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("flash"); }
+  }
+});
+document.addEventListener("input", e => { if (e.target.id === "q") { state.q = e.target.value; render(true); } });
+document.addEventListener("change", e => { if (e.target.id === "f") { state.f = e.target.value; render(); } });
+window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (TABS.some(t => t.id === h) && h !== state.tab) { state = { tab: h, q: "", f: "" }; render(); } });
+render();
+</script>
