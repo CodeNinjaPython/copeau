@@ -56,10 +56,11 @@ function findContact(from, to) {
 }
 
 export class GrblSimulator extends EventEmitter {
-  constructor({ speedup = 1 } = {}) {
+  // laser : Grbl en mode laser ($32=1), sortie broche = laser (S 0 à 1000).
+  constructor({ speedup = 1, laser = false } = {}) {
     super();
     this.speedup = speedup;
-    this.settings = { ...DEFAULT_SETTINGS };
+    this.settings = { ...DEFAULT_SETTINGS, ...(laser ? { 30: '1000', 32: '1' } : {}) };
     this.wcs = { 54: zero(), 55: zero(), 56: zero(), 57: zero(), 58: zero(), 59: zero() };
     this.g92 = zero();
     this.mpos = zero();
@@ -80,13 +81,18 @@ export class GrblSimulator extends EventEmitter {
     this.waiting = false;
     this.planned = { ...this.mpos };
     this.syncWork();
-    setTimeout(() => {
-      if (alarmCode) this.send(`ALARM:${alarmCode}`);
-      this.send('');
-      this.send('Grbl 1.1h [\'$\' for help]');
-      if (this.alarm) this.send('[MSG:\'$H\'|\'$X\' to unlock]');
-    }, 50);
+    setTimeout(() => this.banner(alarmCode), 50);
   }
+
+  banner(alarmCode) {
+    if (alarmCode) this.send(`ALARM:${alarmCode}`);
+    this.send('');
+    this.send('Grbl 1.1h [\'$\' for help]');
+    if (this.alarm) this.send('[MSG:\'$H\'|\'$X\' to unlock]');
+  }
+
+  // Ligne reçue telle que la carte la lit.
+  normalize(raw) { return raw.replace(/\s+/g, '').toUpperCase(); }
 
   // ---- Interface "port série" ------------------------------------------
 
@@ -95,7 +101,7 @@ export class GrblSimulator extends EventEmitter {
     for (const byte of buf) {
       if (this.realtime(byte)) continue;
       if (byte === 0x0a) {
-        const line = this.lineBuf.replace(/\s+/g, '').toUpperCase();
+        const line = this.normalize(this.lineBuf);
         this.lineBuf = '';
         this.rx.push(line);
       } else if (byte !== 0x0d) {
@@ -130,9 +136,16 @@ export class GrblSimulator extends EventEmitter {
       case 0x3f: this.sendStatus(); return true;
       case 0x21:
         if (this.planner.some((x) => x.jog)) this.cancelJog();
-        else if (this.planner.length) this.hold = true;
+        else if (this.planner.length && !this.hold) {
+          // Freinage (Hold:1) avant l'arrêt complet (Hold:0), ~150 ms sur une vraie machine.
+          this.hold = true;
+          this.holdUntil = Date.now() + 150 / Math.max(1, this.speedup);
+        }
         return true;
-      case 0x7e: this.hold = false; this.spindleStopOvr = false; return true; // Grbl rallume la broche à la reprise
+      case 0x7e:
+        // Grbl ignore la reprise tant que la pause n'est pas complète.
+        if (this.hold && Date.now() < this.holdUntil) return true;
+        this.hold = false; this.spindleStopOvr = false; return true; // Grbl rallume la broche à la reprise
       case 0x9e: if (this.hold) this.spindleStopOvr = !this.spindleStopOvr; return true;
       case 0x18: this.softReset(); return true;
       case 0x85: this.cancelJog(); return true;
@@ -168,7 +181,7 @@ export class GrblSimulator extends EventEmitter {
 
   machineState() {
     if (this.alarm) return 'Alarm';
-    if (this.hold) return 'Hold:0';
+    if (this.hold) return Date.now() < this.holdUntil ? 'Hold:1' : 'Hold:0';
     if (this.planner.some((x) => x.homing)) return 'Home';
     if (this.planner.some((x) => x.jog)) return 'Jog';
     if (this.planner.length) return 'Run';
@@ -196,22 +209,28 @@ export class GrblSimulator extends EventEmitter {
   processRx() {
     while (this.rx.length && !this.waiting) {
       const line = this.rx[0];
-      const needsIdle = (line[0] === '$' && !line.startsWith('$J=')) || /G(10|92|28|30|0?4|38\.\d)(?!\d)/.test(line);
-      if (needsIdle && this.planner.length) break;
+      if (this.needsIdle(line) && this.planner.length) break;
       if (this.planner.length >= PLANNER_SIZE) break;
       this.rx.shift();
       let r;
-      try { r = this.execute(line); } catch (e) { r = { err: 20 }; }
-      if (r?.err) this.send(`error:${r.err}`);
+      try { r = this.execute(line); } catch { r = { err: 20 }; }
+      if (r?.err) this.sendError(r.err);
       else if (r?.defer) this.waiting = true;
-      else this.send('ok');
+      else if (!r?.silent) this.send('ok');
     }
   }
+
+  needsIdle(line) {
+    return (line[0] === '$' && !line.startsWith('$J=')) || /G(10|92|28|30|0?4|38\.\d)(?!\d)/.test(line);
+  }
+
+  sendError(code) { this.send(`error:${code}`); }
 
   execute(line) {
     if (!line) return null;
     if (line[0] === '$') return this.dollar(line);
-    if (this.alarm) return { err: 9 };
+    // Comme Grbl (protocol.c) : tout G-code est refusé en alarme ET pendant un jog.
+    if (this.alarm || this.machineState() === 'Jog') return { err: 9 };
     return this.gcode(line);
   }
 
@@ -420,5 +439,225 @@ export class GrblSimulator extends EventEmitter {
     this.send(`[PRB:${p3(this.mpos)}:0]`);
     this.send('ok');
     this.waiting = false;
+  }
+}
+
+// ---- Smoothieware (Emblaser 2) ------------------------------------------------
+// Reproduit le comportement série de Smoothieware (branche edge), d'après son
+// code source : bannière « Smoothie » + « ok » à l'ouverture de l'USB, rapport
+// <Idle|MPos:…|WPos:…|F:…>, temps réel « ? » et Ctrl-X (HALT, levé par M999),
+// « ! » / « ~ » seulement en grbl_mode, erreurs en texte, « !! » en HALT,
+// commandes de console (fire, version, config-get…) et $I / $J sans « ok ».
+// Tout autre octet temps réel est collé à la ligne suivante, qui est alors
+// ignorée (« ok - ignored ») : this.ignored garde ces lignes pour les tests.
+// Le laser tire sur les G1/G2/G3 selon S (0 à 1), jamais en G0.
+
+const p4 = (p) => `${p.X.toFixed(4)},${p.Y.toFixed(4)},${p.Z.toFixed(4)}`;
+
+export class SmoothieSimulator extends GrblSimulator {
+  constructor({ speedup = 1, grblMode = false } = {}) {
+    super({ speedup });
+    this.grblMode = grblMode;
+    this.alarm = false; // l'Emblaser fait son origine au démarrage
+    this.st.feed = 4000; // default_feed_rate
+    this.seekRate = 4000; // default_seek_rate
+    this.laserScale = 1; // M221
+    this.manualFire = 0; // fire <pct>
+    this.ignored = [];
+  }
+
+  banner() {
+    this.send('Smoothie');
+    this.send('ok');
+  }
+
+  // La console garde les minuscules et les espaces (fire 1, $J X1 F100).
+  normalize(raw) {
+    const t = raw.trim();
+    return /^[a-z$]/.test(t) ? t : t.replace(/\s+/g, '').toUpperCase();
+  }
+
+  realtime(b) {
+    if (b === 0x3f) { this.sendStatus(); return true; }
+    if (b === 0x18) { this.halt(); return true; }
+    if (b === 0x19) return true; // ^Y : arrêt du jog continu
+    if (this.grblMode && b === 0x21) { this.hold = true; return true; }
+    if (this.grblMode && b === 0x7e) { this.hold = false; return true; }
+    return false;
+  }
+
+  halt(message = true) {
+    this.planner = [];
+    this.rx = [];
+    this.lineBuf = '';
+    this.waiting = false;
+    this.hold = false;
+    this.planned = { ...this.mpos };
+    this.syncWork();
+    this.alarm = true;
+    this.manualFire = 0;
+    if (message) this.send(this.grblMode ? 'ALARM: Abort during cycle' : 'HALTED, M999 or $X to exit HALT state');
+  }
+
+  machineState() {
+    if (this.alarm) return 'Alarm';
+    if (this.planner.some((x) => x.homing)) return 'Home';
+    if (this.hold) return 'Hold';
+    if (this.planner.length) return 'Run';
+    return 'Idle';
+  }
+
+  needsIdle(line) { return /^\$H/i.test(line); }
+
+  rateOf(b) {
+    if (b.homing || b.jog) return b.rate;
+    return ((b.rapid ? b.seek ?? this.seekRate : b.rate) * this.ov.feed) / 100;
+  }
+
+  laserNow() {
+    if (this.manualFire) return this.manualFire;
+    const cur = this.planner[0];
+    if (!cur || this.hold || cur.type !== 'move' || cur.rapid || !cur.power) return 0;
+    return Math.min(100, cur.power * 100 * this.laserScale);
+  }
+
+  sendStatus() {
+    const cur = this.planner[0];
+    const moving = cur && !this.hold && cur.type === 'move';
+    let s = `<${this.machineState()}|MPos:${p4(this.mpos)}|WPos:${p4(sub(this.mpos, this.wco()))}`;
+    if (moving) {
+      s += `|F:${this.rateOf(cur).toFixed(1)},${(cur.rapid ? cur.seek ?? this.seekRate : cur.rate).toFixed(1)},${this.ov.feed.toFixed(1)}`;
+      s += `|L:${this.laserNow().toFixed(4)}|S:${this.st.speed.toFixed(4)}`;
+    } else {
+      s += `|F:${this.st.feed.toFixed(1)},${this.ov.feed.toFixed(1)}`;
+    }
+    this.send(s + '>');
+  }
+
+  sendError(code) {
+    // Toute erreur G-code fait passer Smoothieware en HALT.
+    this.send(`${this.grblMode ? 'error:' : 'Error: '}G-code invalide (${code})`);
+    this.send('Entering Alarm/Halt state');
+    this.halt(false);
+  }
+
+  execute(line) {
+    if (!line) return null;
+    if (/^[a-z]/.test(line)) return this.shell(line);
+    if (line[0] === '$') return this.dollar(line);
+    if (this.alarm) {
+      if (/^M999(?!\d)/.test(line)) {
+        this.alarm = false;
+        this.send('WARNING: After HALT you should HOME as position is currently unknown');
+        return null;
+      }
+      this.send(this.grblMode ? 'error:Alarm lock' : '!!');
+      return { silent: true };
+    }
+    if (!'GMTSNXYZF'.includes(line[0])) {
+      this.ignored.push(line);
+      this.send('ok - ignored');
+      return { silent: true };
+    }
+    return this.gcode(line);
+  }
+
+  shell(line) {
+    const [cmd, ...args] = line.split(/\s+/);
+    if (cmd === 'fire') {
+      if (this.alarm) return { silent: true };
+      if (args[0] === 'off' || args[0] === '0') {
+        this.manualFire = 0;
+        this.send('turning laser off and returning to auto mode');
+      } else {
+        this.manualFire = Math.max(0, Math.min(100, parseFloat(args[0]) || 0));
+        this.send(`WARNING: Firing laser at ${this.manualFire.toFixed(2)}% power, entering manual mode use fire off to return to auto mode`);
+      }
+    } else if (cmd === 'version') {
+      this.send('Build version: edge-copeau-sim, Build date: Jan  1 2026 00:00:00, MCU: LPC1769, System Clock: 120MHz');
+    } else if (cmd === 'config-get') {
+      const key = args[1];
+      this.send(key === 'default_seek_rate' ? `sd: ${key} is set to 4000` : `sd: ${key} is not in config`);
+    } else if (!cmd.startsWith('ok')) {
+      this.send(`error:Unsupported command - ${cmd}`);
+    }
+    return { silent: true };
+  }
+
+  sendModal() {
+    const s = this.st;
+    this.send(`[GC:G${s.motion} G${s.wcs} G${s.plane} G${s.units} G${s.abs ? 90 : 91} G94 M0 M5 M9 T${s.tool} F${s.feed.toFixed(1)} S${s.speed.toFixed(4)}]`);
+  }
+
+  dollar(line) {
+    const c = line[1]?.toUpperCase();
+    if (c === 'G') { this.sendModal(); return null; }
+    if (c === 'I') { this.sendModal(); return { silent: true }; }
+    if (c === '#') return super.dollar('$#');
+    if (c === 'X') {
+      if (!this.alarm) return { silent: true }; // ne répond rien hors HALT
+      this.alarm = false;
+      this.send('[Caution: Unlocked]');
+      return null;
+    }
+    if (c === 'H') { this.alarm = false; return super.dollar('$H'); }
+    if (c === 'J') {
+      // $J X10 [F600] [-R] : jog relatif, « ok » seulement avec -R.
+      const parts = line.slice(2).trim().split(/\s+/);
+      const to = { ...this.planned };
+      let rate = 3000;
+      for (const p of parts) {
+        const a = p[0]?.toUpperCase();
+        if (AXES.includes(a)) to[a] += parseFloat(p.slice(1));
+        else if (a === 'F') rate = parseFloat(p.slice(1));
+      }
+      this.planner.push({ type: 'move', to, rate, jog: true });
+      this.planned = to;
+      this.syncWork();
+      return parts.some((p) => /^-R$/i.test(p)) ? null : { silent: true };
+    }
+    this.send('error:Invalid statement');
+    return { silent: true };
+  }
+
+  gcode(line) {
+    const words = tokenize(line);
+    const gs = words.filter((w) => w.letter === 'G').map((w) => Math.round(w.value * 10) / 10);
+    const ms = words.filter((w) => w.letter === 'M').map((w) => Math.round(w.value));
+    const val = (l) => words.find((w) => w.letter === l)?.value;
+    if (ms.includes(115)) {
+      this.send('FIRMWARE_NAME:Smoothieware, FIRMWARE_URL:http%3A//smoothieware.org, X-SOURCE_CODE_URL:https://github.com/Smoothieware/Smoothieware, ' +
+        `FIRMWARE_VERSION:edge-copeau-sim, PROTOCOL_VERSION:1.0, X-FIRMWARE_BUILD_DATE:Jan  1 2026 00:00:00, X-SYSTEM_CLOCK:120MHz, X-AXES:5, X-GRBL_MODE:${this.grblMode ? 1 : 0}, X-ARCS:1, X-CNC:0, X-MSD:1`);
+      return null;
+    }
+    if (ms.includes(220)) { if (val('S') !== undefined) this.ov.feed = Math.max(10, Math.min(200, val('S'))); return null; }
+    if (ms.includes(221)) { if (val('S') !== undefined) this.laserScale = val('S') / 100; return null; }
+    if (ms.includes(999)) return null;
+    if (ms.includes(400)) {
+      if (!this.planner.length) return null;
+      this.planner.push({ type: 'dwell', remaining: 0, ok: true });
+      return { defer: true };
+    }
+    if (gs.includes(4)) {
+      // Hors grbl_mode, P est en millisecondes ; un G4 de 0 ms ne fait rien.
+      const p = val('P') ?? 0;
+      const sec = (this.grblMode ? p : Math.trunc(p) / 1000) + (val('S') ?? 0);
+      if (sec <= 0) return null;
+      this.planner.push({ type: 'dwell', remaining: sec, ok: true });
+      return { defer: true };
+    }
+    // F sur un G0 règle la vitesse des rapides, pas l'avance.
+    if (gs.includes(0) && val('F') !== undefined) {
+      this.seekRate = val('F');
+      line = line.replace(/F[-+]?(?:\d+\.?\d*|\.\d+)/, '');
+    }
+    const before = this.planner.length;
+    const r = super.gcode(line);
+    for (let i = before; i < this.planner.length; i++) {
+      const b = this.planner[i];
+      if (b.type === 'move' && !b.rapid) b.power = this.st.speed;
+      if (b.type === 'move' && b.rapid) b.seek = this.seekRate; // vitesse figée à la planification
+    }
+    return r;
   }
 }

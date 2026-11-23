@@ -362,6 +362,32 @@ input[type=range] { width: 100%; accent-color: var(--accent); padding: 0; border
 .toast.ok { border-left-color: var(--ok); }
 @keyframes in { from { opacity: 0; transform: translateY(8px); } }
 
+/* ---- Laser ---- */
+/* Le profil de machine choisit ce qui s'affiche : classes posées sur <body>. */
+body.laser .cnc-only, body:not(.laser) .laser-only,
+body.smoothie .grbl-only, body:not(.smoothie) .smoothie-only { display: none !important; }
+.connect select#profile { max-width: 250px; }
+.net-host { width: 170px; }
+.laser-panel { display: flex; flex-direction: column; gap: 8px; }
+.laser-panel .section-title { margin-bottom: 0; }
+.laser-panel .field.inline input { width: 72px; }
+.laser-live { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.laser-live.on { color: var(--danger); font-weight: 700; }
+#btn-pointer.active { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 700; }
+.raster-card { max-width: 820px; }
+.raster-body { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; margin: 8px 0 14px; }
+.raster-preview { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.raster-preview canvas {
+  width: 100%; max-height: 52vh; object-fit: contain; image-rendering: pixelated;
+  background: #fff; border: 1px solid var(--line); border-radius: 8px;
+}
+.raster-form { display: flex; flex-direction: column; gap: 10px; }
+.raster-form .field input, .raster-form select { width: 100%; }
+.raster-form .field.inline select { width: auto; flex: 1; }
+.raster-info { color: var(--muted); line-height: 1.5; }
+.raster-info .bad { color: var(--warn); }
+@media (max-width: 760px) { .raster-body { grid-template-columns: 1fr; } }
+
 /* ---- Responsive ---- */
 @media (max-width: 1280px) {
   .layout { grid-template-columns: 300px minmax(0, 1fr) 330px; }

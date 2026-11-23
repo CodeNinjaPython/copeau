@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { createState, step, arcPoints } from './shared/gcode.js';
+import { createState, step, arcPoints, segPower } from './shared/gcode.js';
 
 const COLORS = {
   feed: new THREE.Color(0x5aa9ff),
@@ -9,7 +9,11 @@ const COLORS = {
   feedPreview: new THREE.Color(0x3ecf8e),
   rapidPreview: new THREE.Color(0x2f5d48),
   rapidDone: new THREE.Color(0x6b4a2a),
+  // Laser : plus la puissance est forte, plus le trait est clair.
+  laserLow: new THREE.Color(0x1d3350),
+  laserDoneLow: new THREE.Color(0x4a2a10),
 };
+const mix = new THREE.Color();
 
 export class Viewer {
   constructor(el) {
@@ -194,7 +198,9 @@ export class Viewer {
     this.render();
   }
 
-  load(lines) {
+  // laser : { firmware, sMax } pour colorer selon la puissance, ou null.
+  load(lines, { laser = null } = {}) {
+    this.laser = laser;
     if (this.path) {
       this.scene.remove(this.path);
       this.path.geometry.dispose();
@@ -203,15 +209,18 @@ export class Viewer {
     const segLine = [];
     const segRapid = [];
     const segFeed = [];
+    const segPow = [];
     this.lineEnd = new Array(lines.length);
     const st = createState();
     lines.forEach((line, i) => {
       step(st, line, (seg) => {
+        const pw = laser && seg.kind !== 'rapid' ? Math.max(0, Math.min(1, segPower(st, laser.firmware) / (laser.sMax || 1))) : 0;
         const push = (a, b) => {
           pos.push(a.X, a.Y, a.Z, b.X, b.Y, b.Z);
           segLine.push(i);
           segRapid.push(seg.kind === 'rapid' ? 1 : 0);
           segFeed.push(seg.feed || 0);
+          segPow.push(pw);
         };
         if (seg.kind === 'arc') {
           let prev = seg.from;
@@ -226,6 +235,7 @@ export class Viewer {
     this.segLine = Uint32Array.from(segLine);
     this.segRapid = Uint8Array.from(segRapid);
     this.segFeed = Float32Array.from(segFeed);
+    this.segPow = Float32Array.from(segPow);
     this.previewSeg = null;
     this.ghost.visible = false;
     const geom = new THREE.BufferGeometry();
@@ -248,12 +258,17 @@ export class Viewer {
     const col = this.path.geometry.attributes.color;
     for (let s = from; s < to; s++) {
       let c;
+      // Laser : un G1 sans puissance est un déplacement, laser éteint.
+      const travel = this.segRapid[s] || (this.laser && !(this.segPow[s] > 0));
       if (this.previewSeg !== null) {
         const done = s < this.previewSeg;
-        c = this.segRapid[s] ? (done ? COLORS.rapidPreview : COLORS.rapid) : (done ? COLORS.feedPreview : COLORS.feed);
+        c = travel ? (done ? COLORS.rapidPreview : COLORS.rapid) : (done ? COLORS.feedPreview : COLORS.feed);
       } else {
         const done = this.segLine[s] < this.done;
-        c = this.segRapid[s] ? (done ? COLORS.rapidDone : COLORS.rapid) : (done ? COLORS.feedDone : COLORS.feed);
+        c = travel ? (done ? COLORS.rapidDone : COLORS.rapid) : (done ? COLORS.feedDone : COLORS.feed);
+        if (this.laser && !travel) {
+          c = mix.copy(done ? COLORS.laserDoneLow : COLORS.laserLow).lerp(done ? COLORS.feedDone : COLORS.feed, this.segPow[s]);
+        }
       }
       col.setXYZ(s * 2, c.r, c.g, c.b);
       col.setXYZ(s * 2 + 1, c.r, c.g, c.b);

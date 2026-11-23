@@ -56,6 +56,14 @@ const PLANES = {
   19: { a: 'Y', b: 'Z', c: 'X', i: 'J', j: 'K' },
 };
 
+// Valeur S active pour un mouvement d'usinage (puissance laser).
+// Grbl : seulement avec M3/M4. Smoothieware : le laser tire sur tout G1/G2/G3
+// avec un S non nul, M3/M5 n'y changent rien.
+export function segPower(state, firmware = 'grbl') {
+  if (firmware === 'smoothie') return state.speed;
+  return state.spindle === 3 || state.spindle === 4 ? state.speed : 0;
+}
+
 // Exécute une ligne nettoyée sur l'état. emit(seg) est appelé pour chaque
 // mouvement : { kind: 'rapid'|'feed'|'arc', from, to, feed, center?, cw?, plane? }
 export function step(state, line, emit) {
@@ -178,11 +186,19 @@ export const fmt = (n) => (Math.round(n * 1000) / 1000).toString();
 // du point de reprise puis plonge en vitesse d'avance.
 // minSafeZ : hauteur de traversée minimale (Z travail). Un programme qui dégage
 // en G53 ne laisse aucune trace de sa hauteur de sécurité en Z travail.
-export function buildResume(lines, from, { spinUpSeconds = 3, plungeFeed = 300, minSafeZ = 5 } = {}) {
+//
+// laser : pas de montée ni de plongée (le Z sert à la mise au point), pas
+// d'attente de broche ; le laser n'est rallumé qu'une fois la tête sur place.
+export function buildResume(lines, from, { spinUpSeconds = 3, plungeFeed = 300, minSafeZ = 5, laser = false, firmware = 'grbl' } = {}) {
   const st = createState();
   let maxZ = -Infinity;
   for (let i = 0; i < from && i < lines.length; i++) {
     step(st, lines[i], (seg) => { maxZ = Math.max(maxZ, seg.from.Z, seg.to.Z); });
+  }
+  if (laser) {
+    // Beaucoup de fichiers laser ne parlent jamais de Z : ne pas toucher à la mise au point.
+    const zSet = lines.slice(0, from).some((l) => !/G53/.test(l) && /Z[-+.\d]/.test(l));
+    return buildLaserResume(st, firmware, zSet);
   }
   const floor = Number.isFinite(minSafeZ) ? minSafeZ : 5;
   const safeZ = Math.max(Number.isFinite(maxZ) ? maxZ : -Infinity, st.pos.Z, floor);
@@ -201,6 +217,28 @@ export function buildResume(lines, from, { spinUpSeconds = 3, plungeFeed = 300, 
   if (st.units === 20) out.push('G20');
   if (!st.abs) out.push('G91');
   return { lines: out, state: st, safeZ };
+}
+
+function buildLaserResume(st, firmware, zSet) {
+  const out = ['G21', 'G90', `G${st.wcs}`, `G${st.plane}`, `G${st.feedMode}`];
+  // Laser éteint pendant le trajet : M5 (Grbl), G0 (les deux).
+  if (firmware !== 'smoothie') out.push('M5');
+  out.push(`G0X${fmt(st.pos.X)}Y${fmt(st.pos.Y)}`);
+  if (zSet) out.push(`G0Z${fmt(st.pos.Z)}`);
+  const feed = st.feed > 0 ? st.feed : 1000;
+  if (firmware === 'smoothie') {
+    // S est modal sur les G0-G3 : un G1 sans axe le rétablit sans bouger.
+    out.push(`G1F${fmt(feed)}S${fmt(st.speed)}`);
+  } else {
+    if (st.spindle === 3 || st.spindle === 4) out.push(`M${st.spindle}S${fmt(st.speed)}`);
+    out.push(`G1F${fmt(feed)}`);
+  }
+  if (st.motion === 0) out.push('G0');
+  if (st.mist) out.push('M7');
+  if (st.flood) out.push('M8');
+  if (st.units === 20) out.push('G20');
+  if (!st.abs) out.push('G91');
+  return { lines: out, state: st, safeZ: st.pos.Z };
 }
 
 // Analyse complète pour l'affichage : bornes, durée estimée, outils.

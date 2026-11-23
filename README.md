@@ -1,6 +1,6 @@
 # Copeau
 
-Interface web pour piloter une CNC sous **Grbl 1.1 / grblHAL**, inspirée de CNCjs.
+Interface web pour piloter une CNC sous **Grbl 1.1 / grblHAL**, inspirée de CNCjs. Pilote aussi les lasers Grbl et la découpeuse laser **Emblaser 2** (firmware Smoothieware).
 
 ## Démarrer
 
@@ -9,7 +9,7 @@ npm install
 npm start            # http://localhost:8000
 ```
 
-Choisissez le port série de la machine (ou **Simulateur Grbl** pour essayer sans machine), puis **Connecter**.
+Choisissez le type de machine (CNC Grbl, Laser Grbl ou Emblaser 2), le port série (ou **Simulateur** pour essayer sans machine, ou **Réseau** pour une machine en Wi-Fi), puis **Connecter**.
 
 ## Application Windows portable
 
@@ -56,6 +56,13 @@ Attention : n'importe qui sur ce réseau peut alors commander la machine.
 - **Macros** enregistrées dans `data/macros.json`.
 - **Réglages Grbl ($$)** lisibles et modifiables avec leur description en français.
 - **Plusieurs écrans** synchronisés sur la même machine.
+- **Laser** (profils *Laser Grbl* et *Emblaser 2*) : puissance en direct et correction de puissance, tir de repérage (éteint tout seul après 60 s), cadre du programme, reprise laser éteint, vue colorée selon la puissance.
+- **Gravure d'image** façon LaserGRBL : niveaux de gris, noir et blanc ou tramage, balayage aller-retour avec marge d'accélération.
+- **Emblaser 2** : protocole Smoothieware (bannière, `M115`, `M999`, `fire`, `M220` / `M221`, arrêt par Ctrl-X), en USB ou en Wi-Fi (TCP, port 23 par défaut), simulateur dédié.
+
+### Et LaserGRBL ?
+
+LaserGRBL est une application Windows séparée, pour Grbl ; sa prise en charge de Smoothieware (Emblaser 2) est expérimentale. Copeau ne l'embarque pas : il reprend sa fonction principale (gravure d'image ligne à ligne) et exécute les fichiers G-code préparés dans LaserGRBL ou LightBurn. Détails dans le [manuel, section 18](docs/MANUEL.md#18-laser--emblaser-2-et-lasers-grbl).
 
 ## Tests
 
@@ -63,7 +70,7 @@ Attention : n'importe qui sur ce réseau peut alors commander la machine.
 npm test
 ```
 
-Les tests utilisent le simulateur intégré (pièce virtuelle de 100 × 100 × 30 mm percée d'un trou Ø25, fraise Ø6).
+Les tests utilisent le simulateur intégré (pièce virtuelle de 100 × 100 × 30 mm percée d'un trou Ø25, fraise Ø6) et un simulateur Smoothieware écrit d'après le code source de Smoothieware, pour l'Emblaser 2. Ils ne remplacent pas un essai sur la vraie machine.
 
 ## Travailler à plusieurs
 
@@ -82,9 +89,12 @@ Les tests tournent automatiquement sur chaque pull request (GitHub Actions). On 
 
 ## Structure
 
-- `server/grbl.js` : protocole Grbl (envoi par comptage de caractères, état, jobs)
-- `server/simulator.js` : Grbl simulé
+- `server/grbl.js` : protocole Grbl et Smoothieware (envoi par comptage de caractères, état, jobs, laser)
+- `server/simulator.js` : Grbl et Smoothieware simulés
+- `server/tcp.js` : connexion réseau (telnet)
 - `server/probe.js` : routines de palpage
 - `server/index.js` : serveur HTTP + WebSocket
 - `public/js/shared/gcode.js` : interprète G-code partagé (visualiseur, estimation, reprise)
+- `public/js/shared/profiles.js` : types de machine (CNC, laser Grbl, Emblaser 2)
+- `public/js/shared/raster.js` : gravure d'image ligne à ligne
 - `public/js/app.js`, `public/js/viewer.js` : interface

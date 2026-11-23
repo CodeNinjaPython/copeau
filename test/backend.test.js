@@ -154,3 +154,102 @@ test('reprise : hauteur de sécurité minimale avec dégagements G53', () => {
   assert.equal(r.safeZ, 5);
   assert.equal(r.lines.find((l) => l.startsWith('G0Z')), 'G0Z5');
 });
+
+test('changement d\'outil : jog puis « Continuer » tout de suite, la broche repart', async () => {
+  const { c, close } = await setup();
+  try {
+    const sim = c.transport;
+    c.loadJob('outil.nc', 'G21G90\nM3S12000\nG0Z5\nM5\nT2M6\nM3S18000\nG0X10\nG1Z-1F300\nG1X20\n');
+    c.runJob(0);
+    await waitFor(() => c.job.state === 'toolchange');
+    c.jogMove({ Z: 20 }, { relative: true, feed: 1000 }); // l'utilisateur remonte Z…
+    await new Promise((r) => setTimeout(r, 30));
+    c.continueAfterToolChange(); // … et clique « Continuer » pendant le jog
+    await waitFor(() => ['done', 'paused', 'stopped'].includes(c.job.state));
+    assert.equal(c.job.state, 'done', c.job.error);
+    assert.equal(sim.st.spindle, 3, 'broche relancée');
+    assert.equal(sim.st.speed, 18000);
+    near(c.status.wpos.X, 20);
+  } finally { close(); }
+});
+
+test('ligne refusée en alarme ou en jog (error:9) : arrêt et reprise proposée à cette ligne', async () => {
+  const { c, close } = await setup();
+  try {
+    c.loadJob('err9.nc', ['G21G90', 'G0Z5', ...Array.from({ length: 40 }, (_, i) => `G1X${i % 2 ? 10 : 0}Y${i}F3000`)].join('\n'));
+    c.runJob(0);
+    await waitFor(() => c.job.acked > 3);
+    const refused = c.inflight.find((i) => i.jobIndex !== undefined).jobIndex;
+    c.handleLine('error:9'); // la carte refuse la plus ancienne ligne en vol
+    await waitFor(() => c.job.state === 'stopped');
+    assert.match(c.job.error, /error:9/);
+    assert.match(c.job.error, /reprenez à la ligne/);
+    assert.equal(c.job.resumeFrom, refused);
+    assert.equal(c.jobSnapshot().resumeFrom, c.job.resumeFrom);
+  } finally { close(); }
+});
+
+test('G-code envoyé pendant un jog : il attend la fin au lieu d\'être refusé', async () => {
+  const { c, close } = await setup();
+  try {
+    const errors = [];
+    c.on('log', (e) => { if (e.dir === 'err') errors.push(e.text); });
+    c.jogMove({ X: 30 }, { relative: true, feed: 3000 });
+    await c.cmd('G0Y5'); // console pendant le jog
+    await c.sync();
+    near(c.status.wpos.X, 30);
+    near(c.status.wpos.Y, 5);
+    c.jogMove({ X: 60 }, { relative: true, feed: 100 });
+    await waitFor(() => c.status.state === 'Jog');
+    await c.jogStop();
+    const s = await c.nextStatus();
+    assert.equal(s.state, 'Idle', 'jogStop rend la main une fois l\'arrêt fini');
+    assert.deepEqual(errors, []);
+  } finally { close(); }
+});
+
+test('carte qui redémarre à la relance de la broche : job arrêté, aucune ligne envoyée à l\'aveugle', async () => {
+  const { c, close } = await setup();
+  try {
+    const sim = c.transport;
+    const errors = [];
+    c.on('log', (e) => { if (e.dir === 'err') errors.push(e.text); });
+    c.loadJob('pause.nc', ['G21G90', 'M3S12000', 'G0Z5', ...Array.from({ length: 60 }, (_, i) => `G1X${i % 2 ? 40 : 0}Y${i}Z-1F600`), 'M5'].join('\n'));
+    c.runJob(0);
+    await waitFor(() => c.status.state === 'Run');
+    c.pauseJob({ stopSpindle: true });
+    await waitFor(() => c.spindleHeld);
+    const before = { ...c.status.wpos };
+    const resumed = c.resumeJob({ spinUp: 0.3 });
+    // La broche redémarre… et la carte avec (chute de tension) : bannière, alarme.
+    sim.alarm = true; sim.planner = []; sim.powerOn();
+    await resumed;
+    await waitFor(() => c.job.state === 'stopped');
+    await new Promise((r) => setTimeout(r, 400));
+    assert.match(c.job.error, /redémarré/);
+    assert.deepEqual(c.jobSnapshot().lostAt, before);
+    assert.ok(!errors.some((t) => /error:9/.test(t)), errors.join('\n'));
+  } finally { close(); }
+});
+
+test('Reprendre pendant le freinage : la reprise n\'est pas perdue, la broche reste allumée', async () => {
+  const c = new GrblController();
+  const sim = new GrblSimulator({ speedup: 1 }); // freinage réaliste (~150 ms)
+  c.attach(sim, 'sim');
+  try {
+    await waitFor(() => c.ready);
+    await c.cmd('$X');
+    await c.nextStatus();
+    c.loadJob('frein.nc', ['G21G90', 'M3S12000', ...Array.from({ length: 6 }, (_, i) => `G1X${i % 2 ? 20 : 0}F6000`)].join('\n'));
+    c.runJob(0);
+    await waitFor(() => c.status.state === 'Run');
+    c.pauseJob({ stopSpindle: true });
+    await c.resumeJob({ spinUp: 3 }); // aussitôt : Grbl freine encore
+    assert.ok(['running', 'finishing'].includes(c.job.state), c.job.state);
+    await waitFor(() => c.status.state === 'Run', 3000);
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(c.spindleHeld, false, 'la coupure automatique est abandonnée');
+    assert.ok(c.status.speed > 0, 'broche allumée');
+    await waitFor(() => c.job.state === 'done', 20000);
+  } finally { c.detach('fin'); }
+});

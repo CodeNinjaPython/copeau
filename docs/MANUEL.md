@@ -1,6 +1,6 @@
 # Manuel d'utilisation de Copeau
 
-Copeau pilote une fraiseuse CNC équipée d'une carte **Grbl 1.1** ou **grblHAL** depuis un navigateur web. Ce manuel explique comment l'installer, préparer une pièce, lancer un usinage et réagir en cas de problème.
+Copeau pilote une fraiseuse CNC équipée d'une carte **Grbl 1.1** ou **grblHAL** depuis un navigateur web, ainsi que les lasers Grbl et la découpeuse laser **Emblaser 2** (voir [section 18](#18-laser--emblaser-2-et-lasers-grbl)). Ce manuel explique comment l'installer, préparer une pièce, lancer un usinage et réagir en cas de problème.
 
 > **Sécurité avant tout.** Copeau envoie des ordres de mouvement réels. Gardez toujours l'arrêt d'urgence de la machine à portée de main, portez des lunettes, et ne laissez jamais une machine usiner sans surveillance. Le bouton **Reset** de Copeau n'est pas un arrêt d'urgence : il dépend de l'ordinateur et du câble USB.
 
@@ -23,6 +23,7 @@ Copeau pilote une fraiseuse CNC équipée d'une carte **Grbl 1.1** ou **grblHAL*
 15. [Utiliser une tablette ou plusieurs écrans](#15-utiliser-une-tablette-ou-plusieurs-écrans)
 16. [Raccourcis clavier](#16-raccourcis-clavier)
 17. [Dépannage](#17-dépannage)
+18. [Laser : Emblaser 2 et lasers Grbl](#18-laser--emblaser-2-et-lasers-grbl)
 
 ---
 
@@ -89,10 +90,11 @@ Les petits boutons **i** ouvrent une bulle d'explication à côté d'un réglage
 ## 3. Se connecter à la machine
 
 1. Branchez la carte en USB et allumez l'alimentation de la machine.
-2. Cliquez sur **↻** pour rafraîchir la liste des ports.
-3. Choisissez le port (sur Mac il ressemble à `/dev/cu.usbserial-…` ou `/dev/cu.usbmodem…`, sur Windows à `COM3`).
-4. Laissez la vitesse à **115200** (valeur standard de Grbl), sauf si votre carte est réglée autrement.
-5. Cliquez sur **Connecter**.
+2. Dans le premier menu, choisissez le type de machine : **CNC Grbl** (fraiseuse), **Laser Grbl** ou **Emblaser 2**. Pour un laser, voir aussi la [section 18](#18-laser--emblaser-2-et-lasers-grbl).
+3. Cliquez sur **↻** pour rafraîchir la liste des ports.
+4. Choisissez le port (sur Mac il ressemble à `/dev/cu.usbserial-…` ou `/dev/cu.usbmodem…`, sur Windows à `COM3`). Pour une machine en Wi-Fi ou Ethernet, choisissez **Réseau** et tapez son adresse IP.
+5. Laissez la vitesse à **115200** (valeur standard de Grbl), sauf si votre carte est réglée autrement.
+6. Cliquez sur **Connecter**.
 
 Copeau attend le message d'accueil de la carte, puis lit ses réglages. La console affiche `Connecté : Grbl 1.1h …`. Si rien ne se passe après quelques secondes, voir [Dépannage](#17-dépannage).
 
@@ -366,7 +368,7 @@ Vous pouvez alors :
 
 1. remonter Z et changer l'outil (le jog fonctionne) ;
 2. refaire le zéro Z, par exemple avec **Palper Z** ;
-3. cliquer **Continuer**.
+3. cliquer **Continuer**. Le bouton reste grisé tant que la machine bouge encore : Grbl refuserait les lignes suivantes (`error:9`), dont celle qui relance la broche.
 
 > La broche n'est arrêtée que si votre programme l'a coupée (`M5`) avant le `M6`. Vérifiez qu'elle est à l'arrêt avant de toucher l'outil.
 
@@ -459,13 +461,95 @@ Tous les écrans ouverts voient et commandent **la même machine** en temps rée
 | Le jog s'arrête avant la fin | Limites logicielles atteintes (`$20=1`) : c'est voulu. Vérifiez que la course (`$130` à `$132`) correspond à la machine. |
 | `error:22` au démarrage | Le programme commence un usinage sans vitesse d'avance `F`. Corrigez le post-processeur de la FAO. |
 | `error:20` | Commande non gérée par Grbl (souvent un code spécifique à un autre contrôleur). Retirez-la du programme. |
-| `error:9` | La machine est en alarme : voir [section 4](#4-prise-dorigine-et-alarmes). |
+| `error:9` | La machine est en alarme (voir [section 4](#4-prise-dorigine-et-alarmes)) ou un déplacement manuel n'est pas fini. Copeau attend la fin des jogs avant d'envoyer le programme ; si une ligne est quand même refusée, le job s'arrête : reprenez à la ligne proposée dans l'onglet **Reprise**, la broche y est relancée. |
 | Le programme est décalé dans la vue | Le zéro ne correspond pas à celui prévu dans la FAO : vérifiez où la FAO place X0 Y0 Z0. |
 | Palpage : alarme 5 | Pas de contact : rapprochez l'outil, augmentez la course, ou vérifiez la pince. |
 | Palpage : alarme 4 | La sonde touchait déjà : vérifiez que la pince ne touche pas la plaque. |
 | « La carte ne répond pas » | Mauvais port ou mauvaise vitesse : essayez 115200 puis 250000. |
 | « Positions en pouces ($13=1) » | Copeau travaille en mm : envoyez `$13=0` dans la console. |
 | « Usinage en cours : commande refusée » | Normal pendant un usinage : utilisez Pause, Arrêter ou les corrections en direct. |
+| « La carte a redémarré pendant l'usinage », souvent quand la broche (re)démarre | Le démarrage du moteur fait chuter la tension ou envoie des parasites, et la carte redémarre : elle oublie sa position et arrête la broche. Copeau arrête le job. Remèdes : alimentation de la broche séparée de celle de la carte, câble USB court et blindé (avec ferrite), masses bien reliées, fils moteur éloignés des câbles de signal. Ensuite : **Origine**, vérifiez le zéro, puis **Reprise** à la ligne proposée. |
 | La page indique « Serveur perdu » | Le terminal où tourne Copeau a été fermé ou l'ordinateur est en veille. Relancez `npm start`, la page se reconnecte seule. |
+| Emblaser 2 : « La carte ne répond pas » | Le profil **Emblaser 2** est-il choisi ? LightBurn ou LaserGRBL sont-ils fermés ? Le câble USB transmet-il les données ? |
+| « Mode laser désactivé ($32=0) » | Laser Grbl : envoyez `$32=1` dans la console, sinon le laser reste allumé pendant les déplacements. |
+| Gravure trop pâle ou trop foncée partout | **S max** ne correspond pas à la carte (`$30` pour Grbl, `laser_module_maximum_s_value` pour l'Emblaser 2). |
+| Emblaser 2 : à la pause, la tête continue un peu | Normal sans `grbl_mode` : la carte finit les mouvements déjà reçus. Voir [section 18](#18-laser--emblaser-2-et-lasers-grbl). |
 
 Pour aller plus loin, l'historique complet des échanges est dans l'onglet **Console**.
+
+---
+
+## 18. Laser : Emblaser 2 et lasers Grbl
+
+> **Sécurité laser.** Le faisceau d'une diode de 5 ou 10 W brûle la peau et détruit la rétine, même par réflexion. Couvercle fermé, lunettes adaptées à la longueur d'onde (445–455 nm pour l'Emblaser 2), aspiration en marche, extincteur à portée, et **jamais de gravure sans surveillance**. Copeau n'est pas un dispositif de sécurité : l'interrupteur et le couvercle de la machine le sont.
+
+### Choisir le type de machine
+
+Le premier menu de la barre du haut indique ce qui est branché :
+
+| Type | Carte | Particularités |
+|---|---|---|
+| **CNC Grbl (fraiseuse)** | Grbl, grblHAL | Comportement habituel de Copeau. |
+| **Laser Grbl ($32=1)** | Grbl ou grblHAL en mode laser | Puissance au lieu de la broche, `S` de 0 à `$30` (souvent 1000). |
+| **Emblaser 2 (Smoothieware)** | Firmware Darkly Labs, basé sur Smoothieware | Ce n'est **pas** du Grbl : Copeau parle son protocole. `S` de 0 à 1. |
+
+Le choix est mémorisé et partagé entre les écrans. Il ne change pas pendant une connexion : déconnectez d'abord.
+
+### Connecter l'Emblaser 2
+
+- **En USB** : choisissez le port (`COM…` sous Windows, `/dev/cu.usbmodem…` sur Mac). La vitesse est inutile, elle disparaît.
+- **En Wi-Fi** : choisissez **Réseau (Wi-Fi / Ethernet)…** et tapez l'adresse IP de la machine (visible dans l'interface web de l'Emblaser ou dans votre box), suivie du port s'il n'est pas 23 : `192.168.1.50:23`. Cette liaison n'a été essayée qu'avec une console simulée : faites un premier essai sans matière.
+- Fermez **LightBurn** ou **LaserGRBL** avant : un seul logiciel peut parler à la machine.
+
+La console affiche `Connecté : Smoothieware`, puis la version du firmware (réponse à `M115`). L'Emblaser fait sa prise d'origine à la mise sous tension ; **Origine** la relance. **Déverrouiller** envoie `M999`, la commande Smoothieware qui lève un arrêt (HALT).
+
+Copeau n'envoie à l'Emblaser que des commandes qu'il comprend : les commandes temps réel de Grbl (corrections, annulation de jog) y seraient collées à la ligne suivante et la feraient ignorer.
+
+### Ce qui change en mode laser
+
+- **Le laser ne tire que pendant les mouvements de gravure** (`G1`, `G2`, `G3` avec une puissance `S`). Les déplacements `G0`, les jogs, le cadre et les retours à l'origine se font laser éteint.
+- L'onglet **Palpage** disparaît, la tête ne monte plus au Z de survol avant de se déplacer (le Z sert à la mise au point) et il n'y a plus d'attente de broche.
+- **Pause** : un laser Grbl éteint le laser pendant la pause. L'Emblaser 2 s'arrête aussitôt si sa configuration a `grbl_mode` (ou `enable_feed_hold`) ; sinon Copeau n'envoie plus rien et la machine **finit les mouvements déjà reçus** (quelques millimètres à quelques centimètres) avant de s'arrêter. La console indique, à la connexion, lequel des deux cas s'applique.
+- **Arrêter** (Emblaser 2) : arrêt immédiat de la carte (Ctrl-X), laser coupé, puis `M999`. La position est conservée ; si la tête a pu sauter des pas, refaites l'origine.
+- **Corrections en direct** : **Avance** et **Puissance** (−10 / +10 %) agissent pendant la gravure. Sur l'Emblaser 2 elles passent par `M220` et `M221` ; la correction des rapides n'existe pas.
+- **Reprise** : la tête rejoint le point de reprise laser éteint, puis le laser se rallume à la puissance du programme.
+- **Simulation** : sans matière à creuser ; la vue montre la puissance de chaque trait (plus il est clair, plus le laser est fort). Les traits gris sont des déplacements laser éteint.
+
+### Tir de repérage
+
+Le panneau **Laser** allume le laser à très faible puissance (1 % par défaut), tête immobile, pour voir où tombe le point et poser l'origine (**Zéro XY**). Au-delà de 5 %, Copeau demande confirmation : le laser marque alors la matière.
+
+Le laser s'éteint au second clic, tout seul au bout de **60 s**, si l'écran qui l'a allumé se déconnecte, et Copeau refuse de démarrer une gravure tant qu'il est allumé. Un laser Grbl l'éteint pendant un jog : rallumez-le une fois la tête arrêtée. L'Emblaser 2 le garde allumé pendant les déplacements.
+
+### Cadre du programme
+
+**⬚ Cadre du programme** fait le tour du rectangle qui contient le programme, à la hauteur actuelle, laser éteint : vérifiez que la gravure tombe sur la matière. Sur l'Emblaser 2, cochez **pointeur allumé** pour voir le trajet sur la matière. <kbd>Échap</kbd> arrête.
+
+### S max
+
+Valeur de `S` qui correspond à 100 % de puissance : `$30` pour Grbl (lue dans la carte), `laser_module_maximum_s_value` pour l'Emblaser 2 (1 par défaut, donc `S0.5` = 50 %). Elle doit être la même que dans le logiciel qui prépare vos fichiers. Si toutes les gravures sont trop pâles ou brûlées, c'est la première chose à vérifier.
+
+### Graver une image
+
+Comme le mode « ligne à ligne » de LaserGRBL, Copeau transforme une image (PNG, JPG…) en G-code :
+
+1. Bouton **Image…** de la barre du programme, choisissez le fichier.
+2. Réglez le mode, la taille, la résolution, la vitesse et la puissance. L'aperçu montre ce qui sera gravé (noir = puissance max demandée) et la durée estimée.
+3. **Générer et charger** : le programme est chargé comme un fichier ordinaire. Regardez-le en vue **Dessus**, faites le **cadre**, puis **Démarrer**.
+
+| Réglage | Rôle |
+|---|---|
+| **Niveaux de gris** | La puissance suit la teinte : photos. |
+| **Noir et blanc** | Tout ou rien selon le seuil : logos, textes. |
+| **Tramage** | Points tout ou rien qui imitent les gris (Floyd–Steinberg) : photos sur bois clair. |
+| **Résolution** | Lignes par mm. 10 (0,1 mm) convient à une diode de 5 W. |
+| **Puissance min / max** | Le blanc n'est pas gravé ; le gris le plus clair part de la puissance min, le noir est à la puissance max. |
+| **Marge d'accélération** | La tête démarre un peu avant chaque ligne, laser éteint, pour graver à vitesse constante. |
+| **Origine** | X0 Y0 au coin bas gauche ou au centre de l'image. |
+| **Inverser** | Grave les zones claires (matières foncées, ardoise). |
+
+Les zones blanches ou transparentes ne sont pas parcourues. Faites toujours un essai sur une chute de la même matière pour trouver le bon couple vitesse / puissance.
+
+### Et LaserGRBL, LightBurn ?
+
+**LaserGRBL** est un logiciel Windows séparé, conçu pour les lasers Grbl ; son auteur indique que sa prise en charge de Smoothieware (le firmware de l'Emblaser 2) est expérimentale. Copeau ne l'intègre pas, mais reprend sa fonction principale (gravure d'image ligne à ligne) et peut exécuter les fichiers qu'il produit : enregistrez le programme en `.nc` ou `.gcode` dans LaserGRBL ou LightBurn, avec le même **S max**, puis ouvrez-le dans Copeau. Fermez l'autre logiciel avant de connecter Copeau.
