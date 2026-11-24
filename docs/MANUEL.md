@@ -29,6 +29,20 @@ Copeau pilote une fraiseuse CNC équipée d'une carte **Grbl 1.1** ou **grblHAL*
 
 ## 1. Installation et lancement
 
+### Version Windows portable en Rust
+
+Placez `Copeau-Rust-Portable.exe` (ou `copeau-rust.exe` après compilation) dans un dossier accessible en écriture et lancez-le. L'application n'a pas besoin de Node.js à l'exécution ; **Microsoft Edge WebView2 Runtime** doit être présent. Les macros, la configuration et les préférences sont conservées dans le dossier `data` à côté de l'exécutable. Le port local `38427` doit être disponible.
+
+Cette version a été vérifiée avec les simulateurs Grbl et Smoothieware, mais pas sur une CNC ou un laser réel. Commencez par le simulateur correspondant ; avant toute utilisation réelle, vérifiez les déplacements sans outil ni pièce, avec l'arrêt d'urgence accessible. Le portable Rust refuse le repérage et la gravure en profil Laser Grbl tant que `$32=1` n'est pas confirmé.
+
+Arrêtez le job ou le palpage avant de déconnecter la machine. À la fermeture, Copeau tente d'arrêter les mouvements, mais cela ne remplace jamais l'arrêt d'urgence matériel.
+
+Après un palpage interrompu par une alarme, déverrouillez la carte : les unités et le mode absolu ou relatif sont rétablis avant d'autoriser les mouvements. Si leur rétablissement échoue, effectuez un reset et vérifiez les modes avec `$G` avant de déplacer la machine.
+
+[Licences des dépendances Rust et de Three.js](/licenses-rust.html).
+
+### Serveur web Node.js
+
 **Prérequis :** un ordinateur (macOS, Windows ou Linux) avec [Node.js](https://nodejs.org) version 20 ou plus récente.
 
 ```bash
@@ -280,6 +294,9 @@ Les formes sont mémorisées en **coordonnées machine** : elles restent au mêm
 Formats acceptés : `.nc`, `.gcode`, `.ngc`, `.tap`, `.gc`, `.cnc`, `.txt` (G-code texte, 60 Mo maximum).
 
 - Cliquez sur **Ouvrir**, ou **glissez le fichier** sur la vue 3D.
+- **Enregistrer** copie le programme chargé (y compris celui généré depuis une image) en fichier `.nc` dans le dossier de téléchargements.
+- Le dernier programme chargé est **conservé dans le dossier `data`** : il revient prêt après un redémarrage de Copeau, mais ne démarre jamais seul. La position de reprise n'est pas conservée : refaites l'origine puis utilisez l'onglet Reprise.
+- **Mises à jour** (en haut à droite) compare votre version à la dernière version publiée sur GitHub.
 
 La barre du programme affiche le nombre de lignes, la **durée estimée**, les dimensions et le nombre de changements d'outil. La vue 3D montre le parcours : **bleu** pour l'usinage, **gris** pour les déplacements rapides. Le cône jaune est l'outil.
 
@@ -510,6 +527,7 @@ Copeau n'envoie à l'Emblaser que des commandes qu'il comprend : les commandes t
 - **Le laser ne tire que pendant les mouvements de gravure** (`G1`, `G2`, `G3` avec une puissance `S`). Les déplacements `G0`, les jogs, le cadre et les retours à l'origine se font laser éteint.
 - L'onglet **Palpage** disparaît, la tête ne monte plus au Z de survol avant de se déplacer (le Z sert à la mise au point) et il n'y a plus d'attente de broche.
 - **Pause** : un laser Grbl éteint le laser pendant la pause. L'Emblaser 2 s'arrête aussitôt si sa configuration a `grbl_mode` (ou `enable_feed_hold`) ; sinon Copeau n'envoie plus rien et la machine **finit les mouvements déjà reçus** (quelques millimètres à quelques centimètres) avant de s'arrêter. La console indique, à la connexion, lequel des deux cas s'applique.
+- Dans le portable Rust, la pause immédiate Smoothieware est détectée par `X-GRBL_MODE` dans la réponse à `M115`. Si seul `enable_feed_hold` est activé, la pause reste différée.
 - **Arrêter** (Emblaser 2) : arrêt immédiat de la carte (Ctrl-X), laser coupé, puis `M999`. La position est conservée ; si la tête a pu sauter des pas, refaites l'origine.
 - **Corrections en direct** : **Avance** et **Puissance** (−10 / +10 %) agissent pendant la gravure. Sur l'Emblaser 2 elles passent par `M220` et `M221` ; la correction des rapides n'existe pas.
 - **Reprise** : la tête rejoint le point de reprise laser éteint, puis le laser se rallume à la puissance du programme.
@@ -519,7 +537,7 @@ Copeau n'envoie à l'Emblaser que des commandes qu'il comprend : les commandes t
 
 Le panneau **Laser** allume le laser à très faible puissance (1 % par défaut), tête immobile, pour voir où tombe le point et poser l'origine (**Zéro XY**). Au-delà de 5 %, Copeau demande confirmation : le laser marque alors la matière.
 
-Le laser s'éteint au second clic, tout seul au bout de **60 s**, si l'écran qui l'a allumé se déconnecte, et Copeau refuse de démarrer une gravure tant qu'il est allumé. Un laser Grbl l'éteint pendant un jog : rallumez-le une fois la tête arrêtée. L'Emblaser 2 le garde allumé pendant les déplacements.
+Copeau demande l'extinction au second clic, après **60 s** ou si l'écran qui l'a allumé se déconnecte, et refuse de démarrer une gravure tant que le tir est actif. Si la liaison avec la machine est perdue, l'extinction logicielle ne peut pas être garantie : coupez le laser avec sa commande ou son arrêt matériel. Un laser Grbl s'éteint pendant un jog : rallumez-le une fois la tête arrêtée. L'Emblaser 2 le garde allumé pendant les déplacements.
 
 ### Cadre du programme
 

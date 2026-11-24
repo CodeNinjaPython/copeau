@@ -5,15 +5,31 @@ export const ibtn = (key) => `<button type="button" class="ibtn" data-info="${ke
 
 export function initInfo(texts) {
   const pop = document.createElement('div');
+  pop.id = 'copeau-info-pop';
   pop.className = 'info-pop';
   pop.setAttribute('role', 'tooltip');
   pop.hidden = true;
   document.body.append(pop);
+  const labelButton = (btn) => {
+    const title = texts[btn.dataset.info]?.title;
+    btn.setAttribute('aria-label', title ? `Informations sur ${title.toLowerCase()}` : 'Informations complémentaires');
+    btn.setAttribute('aria-controls', pop.id);
+  };
+  document.querySelectorAll('.ibtn[data-info]').forEach(labelButton);
+  const observer = new MutationObserver((records) => {
+    records.forEach(({ addedNodes }) => addedNodes.forEach((node) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      if (node.matches('.ibtn[data-info]')) labelButton(node);
+      node.querySelectorAll('.ibtn[data-info]').forEach(labelButton);
+    }));
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
   let owner = null;
 
   const close = () => {
     if (!owner) return;
     owner.setAttribute('aria-expanded', 'false');
+    owner.removeAttribute('aria-describedby');
     owner.classList.remove('open');
     owner = null;
     pop.hidden = true;
@@ -26,6 +42,7 @@ export function initInfo(texts) {
     owner = btn;
     btn.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
+    btn.setAttribute('aria-describedby', pop.id);
     pop.innerHTML = `${t.title ? `<b>${t.title}</b>` : ''}${t.html}`;
     pop.hidden = false;
     const r = btn.getBoundingClientRect();

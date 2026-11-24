@@ -15,8 +15,9 @@
   </script>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Aller au contenu principal</a>
   <header class="topbar">
-    <div class="brand"><span class="logo"></span>Copeau</div>
+    <div class="brand"><span class="logo" aria-hidden="true"></span>Copeau</div>
     <div class="connect">
       <select id="profile" aria-label="Machine" title="Type de machine"></select>
       <select id="port" aria-label="Port"></select>
@@ -24,26 +25,27 @@
       <select id="baud" aria-label="Vitesse">
         <option>115200</option><option>250000</option><option>57600</option><option>9600</option>
       </select>
-      <button id="btn-refresh" class="ghost icon" title="Rafraîchir les ports">↻</button>
+      <button id="btn-refresh" class="ghost icon" title="Rafraîchir les ports" aria-label="Rafraîchir les ports">↻</button>
       <button id="btn-connect" class="primary">Connecter</button>
       <button type="button" class="ibtn" data-info="connect" aria-label="Plus d'informations" aria-expanded="false">i</button>
     </div>
     <div class="machine-state">
-      <span id="state-badge" class="badge">Déconnecté</span>
+      <span id="state-badge" class="badge" role="status" aria-live="polite">Déconnecté</span>
       <button id="btn-unlock" class="ghost" title="Déverrouiller ($X)">Déverrouiller</button>
       <button id="btn-home" class="ghost" title="Prise d'origine ($H)">Origine</button>
       <button id="btn-reset" class="danger" title="Reset logiciel (Ctrl-X)">Reset</button>
       <button type="button" class="ibtn" data-info="state" aria-label="Plus d'informations" aria-expanded="false">i</button>
       <div class="help">
-        <button id="btn-tour" class="ghost icon" title="Démo guidée">?</button>
+        <button id="btn-tour" class="ghost icon" title="Démo guidée" aria-label="Démarrer la démo guidée">?</button>
         <a class="file-btn" href="/manuel" target="_blank" rel="noopener" title="Manuel d'utilisation">Manuel</a>
+        <button id="btn-update" class="ghost" type="button" title="Chercher une nouvelle version sur GitHub">Mises à jour</button>
       </div>
     </div>
   </header>
 
-  <div id="alarm-bar" class="alarm-bar" hidden></div>
+  <div id="alarm-bar" class="alarm-bar" role="alert" hidden></div>
 
-  <main class="layout">
+  <main id="main-content" class="layout" tabindex="-1">
     <!-- Colonne gauche : position et déplacements -->
     <section class="panel left">
       <div class="dro">
@@ -66,20 +68,20 @@
       <div class="jog">
         <div class="section-title"><span>Déplacement <button type="button" class="ibtn" data-info="jog" aria-label="Plus d'informations" aria-expanded="false">i</button></span><span class="muted small">flèches · + / − · maintenir = répéter le pas</span></div>
         <div class="jog-grid">
-          <button data-jog="X-1 Y1" class="jog-btn diag">↖</button>
-          <button data-jog="Y1" class="jog-btn">Y+</button>
-          <button data-jog="X1 Y1" class="jog-btn diag">↗</button>
-          <button data-jog="Z1" class="jog-btn z">Z+</button>
-          <button data-jog="X-1" class="jog-btn">X−</button>
-          <button id="jog-stop" class="jog-btn stop" title="Arrêter le jog">■</button>
-          <button data-jog="X1" class="jog-btn">X+</button>
+          <button data-jog="X-1 Y1" class="jog-btn diag" aria-label="Déplacer X− et Y+">↖</button>
+          <button data-jog="Y1" class="jog-btn" aria-label="Déplacer Y+">Y+</button>
+          <button data-jog="X1 Y1" class="jog-btn diag" aria-label="Déplacer X+ et Y+">↗</button>
+          <button data-jog="Z1" class="jog-btn z" aria-label="Déplacer Z+">Z+</button>
+          <button data-jog="X-1" class="jog-btn" aria-label="Déplacer X−">X−</button>
+          <button id="jog-stop" class="jog-btn stop" title="Arrêter le jog" aria-label="Arrêter le déplacement">■</button>
+          <button data-jog="X1" class="jog-btn" aria-label="Déplacer X+">X+</button>
           <span></span>
-          <button data-jog="X-1 Y-1" class="jog-btn diag">↙</button>
-          <button data-jog="Y-1" class="jog-btn">Y−</button>
-          <button data-jog="X1 Y-1" class="jog-btn diag">↘</button>
-          <button data-jog="Z-1" class="jog-btn z">Z−</button>
+          <button data-jog="X-1 Y-1" class="jog-btn diag" aria-label="Déplacer X− et Y−">↙</button>
+          <button data-jog="Y-1" class="jog-btn" aria-label="Déplacer Y−">Y−</button>
+          <button data-jog="X1 Y-1" class="jog-btn diag" aria-label="Déplacer X+ et Y−">↘</button>
+          <button data-jog="Z-1" class="jog-btn z" aria-label="Déplacer Z−">Z−</button>
         </div>
-        <div class="seg" id="jog-steps" role="radiogroup" aria-label="Pas">
+        <div class="seg" id="jog-steps" role="group" aria-label="Pas de déplacement">
           <button data-step="0.01">0.01</button><button data-step="0.1">0.1</button>
           <button data-step="1">1</button><button data-step="10">10</button><button data-step="50">50</button>
         </div>
@@ -139,7 +141,7 @@
         <label class="check small cnc-only"><input type="checkbox" id="goto-lift" checked> Monter d'abord à Z <span id="goto-safe">5</span> <button type="button" class="ibtn" data-info="gotoLift" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
         <div class="row gap">
           <button id="goto-go" class="primary grow">Aller ici</button>
-          <button id="goto-cancel" class="ghost" title="Annuler (Échap)">✕</button>
+          <button id="goto-cancel" class="ghost" title="Annuler (Échap)" aria-label="Annuler le déplacement">✕</button>
         </div>
       </div>
       <div class="goto-pop" id="place-pop" hidden>
@@ -148,35 +150,36 @@
         <p class="muted small">Le fichier ne change pas : Copeau décale l'origine X/Y d'autant.</p>
         <div class="row gap">
           <button id="place-apply" class="primary grow">Appliquer</button>
-          <button id="place-cancel" class="ghost" title="Annuler (Échap)">✕</button>
+          <button id="place-cancel" class="ghost" title="Annuler (Échap)" aria-label="Annuler le placement">✕</button>
         </div>
       </div>
       <div class="viewer-hint muted small" id="viewer-hint">Cliquez sur le plateau pour y amener la tête · flèches = X/Y · + / − = Z · Échap = stop</div>
       <div class="playbar" id="playbar" hidden>
-        <button id="pb-play" class="primary pb-btn" title="Lecture / pause (Espace)">▶</button>
-        <button id="pb-restart" class="ghost pb-btn" title="Revenir au début">⏮</button>
+        <button id="pb-play" class="primary pb-btn" title="Lecture / pause (Espace)" aria-label="Lire la simulation">▶</button>
+        <button id="pb-restart" class="ghost pb-btn" title="Revenir au début" aria-label="Recommencer la simulation">⏮</button>
         <div class="pb-track">
           <input id="pb-scrub" type="range" min="0" max="1000" step="1" value="0" aria-label="Position dans la simulation">
           <div class="pb-info"><span id="pb-time">0 s / 0 s</span><span id="pb-line" class="pb-code"></span></div>
         </div>
-        <select id="pb-speed" title="Vitesse de la simulation">
+        <select id="pb-speed" title="Vitesse de la simulation" aria-label="Vitesse de la simulation">
           <option value="1">1×</option><option value="2">2×</option><option value="5" selected>5×</option>
           <option value="10">10×</option><option value="25">25×</option><option value="100">100×</option>
         </select>
         <label class="pb-opt cnc-only" title="Diamètre de la fraise simulée">Ø <input id="pb-tool" type="number" min="0.1" step="0.1" value="6"></label>
         <label class="check pb-opt cnc-only"><input type="checkbox" id="pb-stock" checked> Matière</label>
         <button type="button" class="ibtn" data-info="sim" aria-label="Plus d'informations" aria-expanded="false">i</button>
-        <button id="pb-close" class="ghost pb-btn" title="Quitter la simulation">✕</button>
+        <button id="pb-close" class="ghost pb-btn" title="Quitter la simulation" aria-label="Quitter la simulation">✕</button>
       </div>
       <div class="job-bar" id="job-bar">
-        <div class="job-name"><span id="job-name">Aucun programme</span><span class="muted small" id="job-meta"></span></div>
-        <div class="progress"><div id="job-progress"></div></div>
+        <div class="job-name"><span id="job-name">Aucun programme</span><span id="job-state" class="muted small" role="status" aria-live="polite"></span><span class="muted small" id="job-meta"></span></div>
+        <div class="progress" role="progressbar" aria-label="Avancement du programme" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="job-progress"></div></div>
         <div class="job-times muted small"><span id="job-elapsed"></span><span id="job-remaining"></span>
           <label class="check small pause-opt cnc-only"><input type="checkbox" id="opt-pause-spindle"> Couper la broche en pause <button type="button" class="ibtn" data-info="pauseSpindle" aria-label="Plus d'informations" aria-expanded="false">i</button></label></div>
         <div class="job-actions">
           <button type="button" class="ibtn" data-info="job" aria-label="Plus d'informations" aria-expanded="false">i</button>
-          <label class="ghost file-btn">Ouvrir<input id="file-input" type="file" accept=".nc,.gcode,.ngc,.tap,.gc,.cnc,.txt" hidden></label>
-          <label class="ghost file-btn laser-only" title="Graver une photo ou un logo (PNG, JPG…)">Image…<input id="image-input" type="file" accept="image/*" hidden></label>
+          <label class="ghost file-btn">Ouvrir<input id="file-input" class="visually-hidden" type="file" accept=".nc,.gcode,.ngc,.tap,.gc,.cnc,.txt"></label>
+          <button id="btn-save-program" class="ghost" type="button" title="Enregistrer le programme chargé en fichier .nc" disabled>Enregistrer</button>
+          <label class="ghost file-btn laser-only" title="Graver une photo ou un logo (PNG, JPG…)">Image…<input id="image-input" class="visually-hidden" type="file" accept="image/*"></label>
           <button id="btn-run" class="primary">Démarrer</button>
           <button id="btn-pause" class="warn">Pause</button>
           <button id="btn-spindle" class="ghost cnc-only" hidden title="Arrêter la broche pendant la pause">⏻ Couper la broche</button>
@@ -187,19 +190,19 @@
 
     <!-- Colonne droite : onglets -->
     <section class="panel right">
-      <nav class="tabs" role="tablist">
-        <button data-tab="console" class="active">Console</button>
-        <button data-tab="resume">Reprise</button>
-        <button data-tab="probe" class="cnc-only">Palpage</button>
-        <button data-tab="zones">Zone</button>
-        <button data-tab="macros">Macros</button>
-        <button data-tab="settings">Réglages</button>
+      <nav class="tabs" role="tablist" aria-label="Panneaux de la machine" aria-orientation="horizontal">
+        <button id="tab-console" role="tab" aria-controls="pane-console" aria-selected="true" tabindex="0" data-tab="console" class="active">Console</button>
+        <button id="tab-resume" role="tab" aria-controls="pane-resume" aria-selected="false" tabindex="-1" data-tab="resume">Reprise</button>
+        <button id="tab-probe" role="tab" aria-controls="pane-probe" aria-selected="false" tabindex="-1" data-tab="probe" class="cnc-only">Palpage</button>
+        <button id="tab-zones" role="tab" aria-controls="pane-zones" aria-selected="false" tabindex="-1" data-tab="zones">Zone</button>
+        <button id="tab-macros" role="tab" aria-controls="pane-macros" aria-selected="false" tabindex="-1" data-tab="macros">Macros</button>
+        <button id="tab-settings" role="tab" aria-controls="pane-settings" aria-selected="false" tabindex="-1" data-tab="settings">Réglages</button>
       </nav>
 
-      <div class="tab" data-pane="console">
-        <div id="console" class="console"></div>
+      <div id="pane-console" class="tab" role="tabpanel" aria-labelledby="tab-console" tabindex="0" data-pane="console">
+        <div id="console" class="console" role="log" aria-label="Historique des commandes et réponses de la machine" aria-live="off"></div>
         <form id="console-form" class="row gap">
-          <input id="console-input" autocomplete="off" spellcheck="false" placeholder="G-code ou commande $ (↑ historique)">
+          <input id="console-input" aria-label="Commande G-code ou Grbl" autocomplete="off" spellcheck="false" placeholder="G-code ou commande $ (↑ historique)">
           <button class="primary">Envoyer</button>
         </form>
         <div class="row gap wrap quick">
@@ -217,28 +220,28 @@
         </div>
       </div>
 
-      <div class="tab" data-pane="resume" hidden>
+      <div id="pane-resume" class="tab" role="tabpanel" aria-labelledby="tab-resume" tabindex="0" data-pane="resume" hidden>
         <p class="muted cnc-only">Reprendre un usinage interrompu à partir d'une ligne. Copeau restaure les modes, démarre la broche, remonte au Z de sécurité, se place au-dessus du point puis plonge doucement.</p>
         <p class="muted laser-only">Reprendre une gravure interrompue à partir d'une ligne. Copeau restaure les modes, rejoint le point laser éteint, puis rallume le laser à la puissance du programme.</p>
         <label class="field"><span>Ligne de reprise <button type="button" class="ibtn" data-info="resume" aria-label="Plus d'informations" aria-expanded="false">i</button></span>
           <input id="resume-line" type="number" min="1" value="1">
         </label>
-        <input id="resume-slider" type="range" min="1" value="1">
+        <input id="resume-slider" type="range" min="1" value="1" aria-label="Ligne de reprise">
         <pre id="resume-context" class="code-context"></pre>
         <label class="field inline cnc-only">Attente broche <input id="resume-spinup" type="number" min="0" value="3"><span class="muted">s</span> <button type="button" class="ibtn" data-info="spinup" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
         <pre id="resume-preamble" class="code-context muted"></pre>
         <button id="btn-resume-run" class="primary block">Reprendre à cette ligne</button>
       </div>
 
-      <div class="tab" data-pane="probe" hidden>
-        <div class="seg" id="probe-kind">
+      <div id="pane-probe" class="tab" role="tabpanel" aria-labelledby="tab-probe" tabindex="0" data-pane="probe" hidden>
+        <div class="seg" id="probe-kind" role="group" aria-label="Type de palpage">
           <button data-kind="z" class="active">Z</button>
           <button data-kind="corner">Coin XYZ</button>
           <button data-kind="center">Centre de trou</button>
           <button data-kind="manual">Sans sonde</button>
         </div>
         <p class="muted small" id="probe-help"></p>
-        <div class="probe-corners" id="probe-corners" hidden>
+        <div class="probe-corners" id="probe-corners" role="group" aria-label="Coin à palper" hidden>
           <button data-corner="BL">↖ Arr. gauche</button><button data-corner="BR">↗ Arr. droit</button>
           <button data-corner="FL" class="active">↙ Av. gauche</button><button data-corner="FR">↘ Av. droit</button>
         </div>
@@ -251,7 +254,7 @@
         <div id="probe-result" class="probe-result" hidden></div>
       </div>
 
-      <div class="tab" data-pane="zones" hidden>
+      <div id="pane-zones" class="tab" role="tabpanel" aria-labelledby="tab-zones" tabindex="0" data-pane="zones" hidden>
         <p class="muted small">Amenez l'outil sur un point puis capturez-le, tracez deux clics dans la vue 3D, ou tapez les valeurs (repère travail). Les formes sont mémorisées en coordonnées machine : elles restent en place si vous changez le zéro.</p>
 
         <section class="zone-card" data-target="table">
@@ -266,7 +269,7 @@
 
         <section class="zone-card" data-target="zone">
           <div class="section-title"><span>Zone de travail <button type="button" class="ibtn" data-info="zone" aria-label="Plus d'informations" aria-expanded="false">i</button></span><span class="muted small" data-size></span></div>
-          <div class="seg" data-kind-seg>
+          <div class="seg" data-kind-seg role="group" aria-label="Forme de la zone de travail">
             <button data-kind="rect">Rectangle (2 coins)</button>
             <button data-kind="circle">Cercle (centre + bord)</button>
           </div>
@@ -287,27 +290,27 @@
         <label class="field inline">Hauteur de survol <input id="zone-safe-z" type="number" step="any" value="5"><span class="muted">mm (Z travail)</span> <button type="button" class="ibtn" data-info="safeZ" aria-label="Plus d'informations" aria-expanded="false">i</button></label>
       </div>
 
-      <div class="tab" data-pane="macros" hidden>
+      <div id="pane-macros" class="tab" role="tabpanel" aria-labelledby="tab-macros" tabindex="0" data-pane="macros" hidden>
         <div class="section-title"><span>Macros <button type="button" class="ibtn" data-info="macros" aria-label="Plus d'informations" aria-expanded="false">i</button></span></div>
         <div id="macro-list" class="macro-list"></div>
         <details class="macro-edit">
           <summary>Nouvelle macro / modifier</summary>
-          <input id="macro-name" placeholder="Nom">
-          <textarea id="macro-gcode" rows="6" spellcheck="false" placeholder="G-code, une ligne par commande"></textarea>
+          <input id="macro-name" aria-label="Nom de la macro" placeholder="Nom">
+          <textarea id="macro-gcode" aria-label="Commandes G-code de la macro" rows="6" spellcheck="false" placeholder="G-code, une ligne par commande"></textarea>
           <div class="row gap"><button id="btn-macro-save" class="primary grow">Enregistrer</button><button id="btn-macro-new" class="ghost">Vider</button></div>
         </details>
       </div>
 
-      <div class="tab" data-pane="settings" hidden>
-        <div class="row gap"><input id="settings-filter" class="grow" placeholder="Filtrer les réglages…"><button type="button" class="ibtn" data-info="settings" aria-label="Plus d'informations" aria-expanded="false">i</button></div>
+      <div id="pane-settings" class="tab" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" data-pane="settings" hidden>
+        <div class="row gap"><input id="settings-filter" class="grow" aria-label="Filtrer les réglages" placeholder="Filtrer les réglages…"><button type="button" class="ibtn" data-info="settings" aria-label="Plus d'informations sur les réglages" aria-expanded="false">i</button></div>
         <div id="settings-list" class="settings-list"><p class="muted">Connectez une machine pour lire ses réglages ($$).</p></div>
       </div>
     </section>
   </main>
 
-  <div id="toolchange" class="modal" hidden>
+  <div id="toolchange" class="modal" role="dialog" aria-modal="true" aria-labelledby="toolchange-title" tabindex="-1" hidden>
     <div class="modal-card">
-      <h2>Changement d'outil</h2>
+      <h2 id="toolchange-title">Changement d'outil</h2>
       <p>Le programme demande l'outil <b id="tool-number"></b>. La broche est à l'arrêt seulement si votre programme l'a coupée : vérifiez avant de toucher l'outil.</p>
       <ol class="muted">
         <li>Remontez Z et changez l'outil (le jog fonctionne).</li>
@@ -322,13 +325,13 @@
     </div>
   </div>
 
-  <div id="raster" class="modal" hidden>
+  <div id="raster" class="modal" role="dialog" aria-modal="true" aria-labelledby="raster-title" tabindex="-1" hidden>
     <div class="modal-card raster-card">
-      <h2>Graver une image <button type="button" class="ibtn" data-info="image" aria-label="Plus d'informations" aria-expanded="false">i</button></h2>
+      <h2 id="raster-title">Graver une image <button type="button" class="ibtn" data-info="image" aria-label="Plus d'informations sur la gravure d'image" aria-expanded="false">i</button></h2>
       <div class="raster-body">
         <div class="raster-preview"><canvas id="raster-canvas" width="10" height="10"></canvas><p class="muted small">Aperçu : noir = laser à pleine puissance demandée.</p></div>
         <div class="raster-form" id="raster-form">
-          <div class="seg" id="raster-mode">
+          <div class="seg" id="raster-mode" role="group" aria-label="Mode de gravure">
             <button data-rmode="gray">Niveaux de gris</button><button data-rmode="threshold">Noir et blanc</button><button data-rmode="dither">Tramage</button>
           </div>
           <div class="grid2">
@@ -355,7 +358,7 @@
     </div>
   </div>
 
-  <div id="toasts" class="toasts"></div>
+  <div id="toasts" class="toasts" aria-live="polite" aria-relevant="additions text"></div>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>

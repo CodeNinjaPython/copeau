@@ -3,13 +3,14 @@
 
 export function startTour(steps, { onClose, start = 0 } = {}) {
   let i = 0;
+  const returnFocus = document.activeElement;
   const root = document.createElement('div');
   root.className = 'tour';
   root.innerHTML = `
     <div class="tour-spot"></div>
-    <div class="tour-card" role="dialog" aria-live="polite">
-      <div class="tour-step"></div>
-      <h3 class="tour-title"></h3>
+    <div class="tour-card" role="dialog" aria-modal="true" aria-labelledby="tour-title" tabindex="-1">
+      <div class="tour-step" role="status" aria-live="polite"></div>
+      <h3 class="tour-title" id="tour-title"></h3>
       <div class="tour-body"></div>
       <div class="tour-nav">
         <button class="ghost small tour-skip">Passer la démo</button>
@@ -26,6 +27,7 @@ export function startTour(steps, { onClose, start = 0 } = {}) {
     window.removeEventListener('keydown', onKey, true);
     window.removeEventListener('resize', place);
     root.remove();
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     onClose?.();
   };
 
@@ -89,12 +91,26 @@ export function startTour(steps, { onClose, start = 0 } = {}) {
 
   // Capture : les flèches pilotent la démo, pas la machine.
   function onKey(e) {
-    if (['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', '+', '=', '-', 'Escape', 'Enter'].includes(e.key)) {
+    if (e.key === 'Tab') {
+      const focusable = [...card.querySelectorAll('button:not(:disabled):not([hidden])')];
+      if (!focusable.length) {
+        e.preventDefault();
+        card.focus();
+      } else if (e.shiftKey && document.activeElement === focusable[0]) {
+        e.preventDefault();
+        focusable[focusable.length - 1].focus();
+      } else if (!e.shiftKey && document.activeElement === focusable[focusable.length - 1]) {
+        e.preventDefault();
+        focusable[0].focus();
+      }
+      return;
+    }
+    if (['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', '+', '=', '-', 'Escape'].includes(e.key)) {
       e.preventDefault();
       e.stopImmediatePropagation();
     }
     if (e.key === 'Escape') close();
-    else if (e.key === 'ArrowRight' || e.key === 'Enter') { if (i === steps.length - 1) close(); else show(i + 1); }
+    else if (e.key === 'ArrowRight') { if (i === steps.length - 1) close(); else show(i + 1); }
     else if (e.key === 'ArrowLeft') show(i - 1);
   }
 

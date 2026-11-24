@@ -14,6 +14,7 @@ const store = {
 };
 
 const S = {
+  serverConnected: false,
   machine: { connected: false, ready: false, status: { state: 'Déconnecté', wpos: { X: 0, Y: 0, Z: 0 }, mpos: { X: 0, Y: 0, Z: 0 }, ov: {} }, modal: {} },
   job: null,
   lines: [],
@@ -42,15 +43,45 @@ const unlockCmd = () => (isSmoothie() ? 'M999' : '$X');
 let ws;
 let reqId = 0;
 const pending = new Map();
+const serverControlSelector = [
+  '#btn-connect', '#btn-refresh', '#btn-unlock', '#btn-home', '#btn-reset', '[data-zero]',
+  '[data-axis-home]', '[data-edit]', '[data-jog]', '#jog-stop', '#btn-goto-zero',
+  '#btn-goto-origin', '[data-rt]', '#btn-pointer', '#btn-frame', '#btn-run', '#btn-pause',
+  '#btn-spindle', '#btn-stop', '#btn-resume-run', '#btn-probe', '#btn-tool-probe',
+  '#btn-tool-continue', '#btn-tool-stop', '#btn-place', '[data-outline]', '#btn-outline-job',
+  '[data-cap]', '[data-draw]', '[data-from-job]', '[data-dims-apply]', '[data-from-grbl]',
+  '[data-cmd]', '#console-input', '#console-form button', '#settings-list input', '[data-macro-run]',
+].join(',');
+
+function setServerControlLock(locked) {
+  $$(serverControlSelector).forEach((el) => {
+    if (locked) {
+      if (!el.hasAttribute('data-server-disabled')) {
+        el.dataset.serverDisabled = String(el.disabled);
+      }
+      el.disabled = true;
+    } else if (el.hasAttribute('data-server-disabled')) {
+      el.disabled = el.dataset.serverDisabled === 'true';
+      delete el.dataset.serverDisabled;
+    }
+  });
+}
 
 function connectWs() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
   ws.onopen = () => { refreshPorts(); loadMacros(); };
   ws.onmessage = (e) => onMessage(JSON.parse(e.data));
   ws.onclose = () => {
     for (const p of pending.values()) p.reject(new Error('Serveur injoignable'));
     pending.clear();
-    setBadge('Serveur perdu', 'alarm');
+    S.serverConnected = false;
+    S.machine = { ...S.machine, connected: false, ready: false, status: { ...S.machine.status, state: 'État inconnu' } };
+    setBadge('État inconnu', 'alarm');
+    const alarm = $('#alarm-bar');
+    alarm.textContent = 'Serveur déconnecté : état de la machine inconnu. Ne lancez aucune commande avant la reconnexion.';
+    alarm.hidden = false;
+    setServerControlLock(true);
+    updateEnabled();
     setTimeout(connectWs, 1500);
   };
 }
@@ -78,7 +109,12 @@ function onMessage(m) {
       m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
       return;
     }
-    case 'state': S.machine = m.s; applyProfile(); return renderMachine();
+    case 'state':
+      setServerControlLock(false);
+      S.serverConnected = true;
+      S.machine = m.s;
+      applyProfile();
+      return renderMachine();
     case 'job': S.job = m.j; return renderJob();
     case 'job-text': return onJobText(m.name, m.text);
     case 'settings': S.settings = m.s; applyProfile(); return renderSettings();
@@ -100,10 +136,56 @@ function onMessage(m) {
 function toast(text, kind = 'info') {
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
+  el.setAttribute('role', kind === 'err' ? 'alert' : 'status');
   el.textContent = text;
   $('#toasts').append(el);
   setTimeout(() => el.remove(), kind === 'err' ? 6000 : 3500);
 }
+
+const modalReturnFocus = new WeakMap();
+const modalFocusSelector = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])';
+
+function openModal(modal) {
+  if (modal.hidden) modalReturnFocus.set(modal, document.activeElement);
+  modal.hidden = false;
+  requestAnimationFrame(() => modal.querySelector(modalFocusSelector)?.focus());
+}
+
+function closeModal(modal) {
+  if (modal.hidden) return;
+  modal.hidden = true;
+  const returnFocus = modalReturnFocus.get(modal);
+  modalReturnFocus.delete(modal);
+  if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+}
+
+function handleModalKeydown(modal, event, onEscape) {
+  if (event.key === 'Escape' && onEscape) {
+    event.preventDefault();
+    onEscape();
+    return;
+  }
+  if (event.key !== 'Tab') return;
+  const focusable = [...modal.querySelectorAll(modalFocusSelector)].filter((el) => !el.closest('[hidden]'));
+  if (!focusable.length) {
+    event.preventDefault();
+    modal.focus();
+    return;
+  }
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (document.activeElement === last || !modal.contains(document.activeElement))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+$('#toolchange').addEventListener('keydown', (event) => handleModalKeydown($('#toolchange'), event));
+$('#raster').addEventListener('keydown', (event) => handleModalKeydown($('#raster'), event, () => {
+  if (!rasterGenerating) closeRaster();
+}));
 
 function addLog({ dir, text }) {
   const box = $('#console');
@@ -354,11 +436,18 @@ function updateEnabled() {
   $('#btn-probe').disabled = !idle || (jobActive && j.state !== 'toolchange');
   $('#btn-place').disabled = !canRun && !$('#btn-place').classList.contains('active');
   $('#btn-preview').disabled = !S.lines.length || (jobActive && !preview?.active);
+  $('#btn-refresh').disabled = !S.serverConnected;
+  $('#console-input').disabled = !S.serverConnected;
+  $('#console-form button').disabled = !S.serverConnected;
+  $$('[data-cmd]').forEach((b) => (b.disabled = !S.serverConnected || !m.ready));
+  $$('#settings-list input').forEach((input) => (input.disabled = !S.serverConnected || !m.ready));
+  $$('[data-macro-run]').forEach((b) => (b.disabled = !S.serverConnected || !m.ready));
   const zoneOutline = $('.zone-card[data-target="zone"] [data-outline]');
   if (zoneOutline) {
     zoneOutline.disabled = !S.zones.zone || !canJog;
     $('#btn-outline-job').disabled = !(S.info && Number.isFinite(S.info.min.X)) || !canJog;
   }
+  setServerControlLock(!S.serverConnected);
 }
 
 // ---- Zéro / déplacements ----------------------------------------------------
@@ -396,7 +485,11 @@ $('#btn-goto-origin').onclick = () => {
 
 let jogStep = store.get('jogStep', 1);
 function renderSteps() {
-  $$('#jog-steps button').forEach((b) => b.classList.toggle('active', Number(b.dataset.step) === jogStep));
+  $$('#jog-steps button').forEach((b) => {
+    const active = Number(b.dataset.step) === jogStep;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
 }
 $('#jog-steps').onclick = (e) => {
   const b = e.target.closest('[data-step]');
@@ -484,6 +577,21 @@ for (const b of $$('[data-jog]')) {
   const up = () => { b.classList.remove('active'); j.release(dir); };
   b.addEventListener('pointerup', up);
   b.addEventListener('pointercancel', up);
+  b.addEventListener('keydown', (e) => {
+    if (!['Enter', ' '].includes(e.key) || e.repeat || b.disabled) return;
+    e.preventDefault();
+    b.classList.add('active');
+    j.press(dir);
+  });
+  b.addEventListener('keyup', (e) => {
+    if (!['Enter', ' '].includes(e.key)) return;
+    b.classList.remove('active');
+    j.release(dir);
+  });
+  b.addEventListener('blur', () => {
+    b.classList.remove('active');
+    j.release(dir);
+  });
 }
 $('#jog-stop').onclick = () => act('jogStop').catch(() => {});
 
@@ -500,8 +608,8 @@ const keyJoggers = {};
 const heldKeys = {};
 // Seuls les champs de saisie gardent les flèches ; un menu ou un bouton qui a
 // le focus ne doit pas empêcher de déplacer la machine.
-const typing = (e) => e.target.tagName === 'TEXTAREA' ||
-  (e.target.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(e.target.type));
+const typing = (e) => e.target.isContentEditable
+  || !!e.target.closest('input, select, textarea, button, a, summary, [role="button"], [role="tab"], [role="slider"]');
 
 function jogBlockedReason() {
   const m = S.machine;
@@ -535,8 +643,6 @@ document.addEventListener('keyup', (e) => {
   $(`[data-jog="${KEY_BUTTON[held.key]}"]`)?.classList.remove('active');
   held.jogger.release(KEYS[held.key]);
 });
-// Après un choix dans un menu, on rend le focus à la page pour le clavier.
-$$('select').forEach((sel) => sel.addEventListener('change', () => sel.blur()));
 window.addEventListener('blur', () => {
   // La fenêtre perd le focus : aucun relâchement de touche ne viendra.
   for (const code of Object.keys(heldKeys)) {
@@ -554,6 +660,9 @@ const viewer = new Viewer($('#viewer'));
 $$('[data-view]').forEach((b) => (b.onclick = () => viewer.view(b.dataset.view)));
 
 function onJobText(name, text) {
+  S.jobText = text;
+  S.jobName = name;
+  $('#btn-save-program').disabled = false;
   S.lines = splitProgram(text);
   const rapid = Number(S.settings[110]) || 3000;
   S.info = analyze(S.lines, { rapidRate: rapid });
@@ -581,6 +690,43 @@ async function loadFile(file) {
   await act('load', { name: file.name, text }).then(() => toast(`${file.name} chargé`, 'ok')).catch(() => {});
 }
 $('#file-input').onchange = (e) => { loadFile(e.target.files[0]); e.target.value = ''; };
+$('#btn-save-program').onclick = () => {
+  if (S.jobText == null) return toast('Aucun programme à enregistrer', 'err');
+  const name = /\.[A-Za-z0-9]{1,5}$/.test(S.jobName) ? S.jobName : `${S.jobName || 'programme'}.nc`;
+  const url = URL.createObjectURL(new Blob([S.jobText], { type: 'text/plain;charset=utf-8' }));
+  const link = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  toast(`${name} enregistré dans le dossier de téléchargements`, 'ok');
+};
+
+const REPO = 'CodeNinjaPython/copeau';
+const versionParts = (v) => String(v).replace(/^v/i, '').split(/[.+-]/).map((n) => parseInt(n, 10) || 0);
+const isNewer = (a, b) => {
+  const x = versionParts(a), y = versionParts(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
+$('#btn-update').onclick = async () => {
+  const button = $('#btn-update');
+  button.disabled = true;
+  try {
+    const current = await fetch('/api/version', { cache: 'no-store' }).then((r) => r.json());
+    const response = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
+    if (response.status === 404) return toast(`Version ${current.version} : aucune version publiée sur GitHub`, 'info');
+    if (!response.ok) throw new Error(`GitHub a répondu ${response.status}`);
+    const release = await response.json();
+    if (!isNewer(release.tag_name, current.version)) return toast(`Copeau ${current.version} est à jour`, 'ok');
+    toast(`Version ${release.tag_name} disponible (vous avez ${current.version}). Ouverture de la page de téléchargement.`, 'ok');
+    window.open(String(release.html_url).startsWith('https://github.com/') ? release.html_url : `https://github.com/${REPO}/releases`, '_blank', 'noopener');
+  } catch (e) {
+    toast(`Recherche de mise à jour impossible : ${e.message}`, 'err');
+  } finally {
+    button.disabled = false;
+  }
+};
 const wrap = $('.viewer-wrap');
 wrap.addEventListener('dragover', (e) => { e.preventDefault(); wrap.classList.add('dragging'); });
 wrap.addEventListener('dragleave', (e) => { if (!wrap.contains(e.relatedTarget)) wrap.classList.remove('dragging'); });
@@ -593,15 +739,25 @@ const JOB_STATE = {
 
 function renderJob() {
   const j = S.job;
+  const jobState = j ? (JOB_STATE[j.state] || j.state) : 'Aucun programme';
+  if ($('#job-state').textContent !== jobState) $('#job-state').textContent = jobState;
   if (j && ['running', 'finishing'].includes(j.state)) closePreview();
   const bar = $('#job-progress');
-  if (!j) { bar.style.width = '0'; updateEnabled(); return; }
+  if (!j) {
+    bar.style.transform = 'scaleX(0)';
+    bar.parentElement.setAttribute('aria-valuenow', '0');
+    updateEnabled();
+    return;
+  }
   const pct = j.total ? (j.acked / j.total) * 100 : 0;
-  bar.style.width = `${pct}%`;
+  bar.style.transform = `scaleX(${pct / 100})`;
+  bar.parentElement.setAttribute('aria-valuenow', String(Math.round(pct)));
   viewer.setProgress(j.state === 'loaded' ? 0 : j.acked);
   renderTimes();
   if (j.error && j.error !== lastJobError) { lastJobError = j.error; toast(j.error, 'err'); }
-  $('#toolchange').hidden = j.state !== 'toolchange';
+  const toolchange = $('#toolchange');
+  if (j.state === 'toolchange' && toolchange.hidden) openModal(toolchange);
+  else if (j.state !== 'toolchange' && !toolchange.hidden) closeModal(toolchange);
   if (j.state === 'stopped' && (j.resumeFrom !== null || j.lostAt) && lastJobState !== 'stopped') setupResume();
   if (j.state === 'toolchange') $('#tool-number').textContent = `T${j.tool}`;
   if (j.state === 'done' && lastJobState !== 'done') toast(`Job terminé en ${fmtDuration((j.finishedAt - j.startedAt) / 1000)}`, 'ok');
@@ -764,16 +920,42 @@ $('#btn-resume-run').onclick = () => {
 
 // ---- Onglets ---------------------------------------------------------------
 
-let activeTab = $(`.tab[data-pane="${location.hash.slice(1)}"]`) ? location.hash.slice(1) : store.get('tab', 'console');
+const tabButtons = () => $$('.tabs [role="tab"]:not([hidden])').filter((button) => getComputedStyle(button).display !== 'none');
+const validTabs = () => tabButtons().map((button) => button.dataset.tab);
+const storedTab = store.get('tab', 'console');
+let activeTab = validTabs().includes(location.hash.slice(1)) ? location.hash.slice(1)
+  : validTabs().includes(storedTab) ? storedTab : 'console';
 function showTab(name) {
+  if (!validTabs().includes(name)) name = 'console';
   activeTab = name;
   store.set('tab', name);
-  $$('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  $$('.tabs [role="tab"]').forEach((b) => {
+    const selected = b.dataset.tab === name;
+    b.classList.toggle('active', selected);
+    b.setAttribute('aria-selected', String(selected));
+    b.tabIndex = selected ? 0 : -1;
+  });
   $$('.tab').forEach((p) => (p.hidden = p.dataset.pane !== name));
   if (name === 'resume') setResumeLine(Number($('#resume-line').value));
   else viewer.setMarker(0);
 }
-$('.tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) showTab(b.dataset.tab); };
+$('.tabs').onclick = (e) => { const b = e.target.closest('[role="tab"]'); if (b) showTab(b.dataset.tab); };
+$('.tabs').addEventListener('keydown', (event) => {
+  const current = event.target.closest('[role="tab"]');
+  if (!current) return;
+  const tabs = tabButtons();
+  const index = tabs.indexOf(current);
+  let next = null;
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = tabs[(index + 1) % tabs.length];
+  else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = tabs[(index - 1 + tabs.length) % tabs.length];
+  else if (event.key === 'Home') next = tabs[0];
+  else if (event.key === 'End') next = tabs[tabs.length - 1];
+  if (next) {
+    event.preventDefault();
+    showTab(next.dataset.tab);
+    next.focus();
+  }
+});
 showTab(activeTab);
 
 // ---- Console ---------------------------------------------------------------
@@ -844,7 +1026,11 @@ function probeValues(kind) {
 }
 
 function renderProbe() {
-  $$('#probe-kind button').forEach((b) => b.classList.toggle('active', b.dataset.kind === probeKind));
+  $$('#probe-kind button').forEach((b) => {
+    const active = b.dataset.kind === probeKind;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
   $('#probe-help').textContent = PROBE_HELP[probeKind];
   const manual = probeKind === 'manual';
   $('#probe-manual').hidden = !manual;
@@ -852,7 +1038,11 @@ function renderProbe() {
   $('#probe-fields').hidden = manual;
   if (manual) { $('#probe-corners').hidden = true; $('#probe-result').hidden = true; renderManual(); return; }
   $('#probe-corners').hidden = probeKind !== 'corner';
-  $$('#probe-corners button').forEach((b) => b.classList.toggle('active', b.dataset.corner === probeCorner));
+  $$('#probe-corners button').forEach((b) => {
+    const active = b.dataset.corner === probeCorner;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
   const vals = probeValues(probeKind);
   $('#probe-fields').innerHTML = PROBE_FIELDS[probeKind].map(([k, label]) =>
     `<label class="field"><span>${label} ${ibtn(`pf-${k}`)}</span><input type="number" step="any" data-pk="${k}" value="${vals[k]}"></label>`).join('');
@@ -1054,9 +1244,9 @@ function pointRow(label, key, p, capLabel) {
   const w = toWork(p);
   const v = (a) => (w ? r3(w[a]) : '');
   return `<div class="zone-pt"><span>${label}</span>
-    <input type="number" step="any" data-pt="${key}" data-axis="X" placeholder="X" value="${v('X')}" class="${w ? '' : 'empty'}">
-    <input type="number" step="any" data-pt="${key}" data-axis="Y" placeholder="Y" value="${v('Y')}" class="${w ? '' : 'empty'}">
-    <button class="ghost small" data-cap="${key}" title="Prendre la position actuelle de l'outil">${capLabel}</button></div>`;
+    <input type="number" step="any" data-pt="${key}" data-axis="X" placeholder="X" aria-label="${label} X en coordonnées de travail" value="${v('X')}" class="${w ? '' : 'empty'}">
+    <input type="number" step="any" data-pt="${key}" data-axis="Y" placeholder="Y" aria-label="${label} Y en coordonnées de travail" value="${v('Y')}" class="${w ? '' : 'empty'}">
+    <button class="ghost small" data-cap="${key}" aria-label="${capLabel} : ${label}" title="Prendre la position actuelle de l'outil">${capLabel}</button></div>`;
 }
 
 function renderZoneCard(target) {
@@ -1064,7 +1254,11 @@ function renderZoneCard(target) {
   const saved = S.zones[target];
   card.querySelector('[data-size]').textContent = shapeSize(saved);
   const d = drafts[target];
-  card.querySelectorAll('[data-kind]').forEach((b) => b.classList.toggle('active', b.dataset.kind === d.kind));
+  card.querySelectorAll('[data-kind]').forEach((b) => {
+    const active = b.dataset.kind === d.kind;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
   const drawBtn = card.querySelector('[data-draw]');
   drawBtn.textContent = draw?.target === target ? 'Annuler le tracé' : 'Tracer sur la vue';
   const form = card.querySelector('[data-form]');
@@ -1072,9 +1266,9 @@ function renderZoneCard(target) {
   form.innerHTML = d.kind === 'circle'
     ? pointRow('Centre', 'c', d.c, 'Capturer') +
       `<div class="zone-pt"><span>Rayon</span>
-        <input type="number" step="any" min="0" data-radius placeholder="R" value="${d.r ? r3(d.r) : ''}" class="${d.r ? '' : 'empty'}">
+        <input type="number" step="any" min="0" data-radius placeholder="R" aria-label="Rayon de la zone en millimètres" value="${d.r ? r3(d.r) : ''}" class="${d.r ? '' : 'empty'}">
         <span></span>
-        <button class="ghost small" data-cap="edge" title="Rayon = distance entre le centre et la position actuelle">Point du bord</button></div>`
+        <button class="ghost small" data-cap="edge" aria-label="Capturer le point du bord du cercle" title="Rayon = distance entre le centre et la position actuelle">Point du bord</button></div>`
     : pointRow('Coin 1', 'a', d.a, 'Capturer') + pointRow('Coin 2', 'b', d.b, 'Capturer');
   if (target === 'table') renderTableDims(card, saved);
 }
@@ -1092,7 +1286,7 @@ function renderTableDims(card, saved) {
   const w = val(saved && Math.abs(saved.b.X - saved.a.X), 130);
   const h = val(saved && Math.abs(saved.b.Y - saved.a.Y), 131);
   const z = val(saved ? saved.z || undefined : undefined, 132);
-  const field = (k, v, ph) => `<input type="number" step="any" min="1" data-dim="${k}" placeholder="${ph}" value="${v}" class="${v !== '' ? '' : 'empty'}" title="Course ${k} (mm)">`;
+  const field = (k, v, ph) => `<input type="number" step="any" min="1" data-dim="${k}" placeholder="${ph}" aria-label="Course machine ${k} en millimètres" value="${v}" class="${v !== '' ? '' : 'empty'}" title="Course ${k} (mm)">`;
   const anchor = store.get('tableAnchor', 'machine');
   box.innerHTML = `
     <div class="zone-dims-row"><span>Course</span>${field('X', w, 'X')}${field('Y', h, 'Y')}${field('Z', z, 'Z')}</div>
@@ -1344,9 +1538,11 @@ $('#laser-smax').onchange = (e) => {
 
 const raster = { img: null, url: null, name: '', aspect: 1, opts: { ...RASTER_DEFAULTS, width: 50, height: 50, ...store.get('raster', {}) } };
 const RASTER_MAX_POINTS = 16e6;
+let rasterGenerating = false;
 
 async function openRaster(file) {
   if (!file) return;
+  if (rasterGenerating) return toast('Attendez la fin de la génération en cours.', 'info');
   const url = URL.createObjectURL(file);
   const img = new Image();
   try {
@@ -1356,11 +1552,11 @@ async function openRaster(file) {
   Object.assign(raster, { img, url, name: file.name.replace(/\.[^.]+$/, ''), aspect: img.naturalHeight / img.naturalWidth });
   raster.opts.height = r3(raster.opts.width * raster.aspect);
   fillRasterForm();
-  $('#raster').hidden = false;
+  openModal($('#raster'));
   drawRaster();
 }
 function closeRaster() {
-  $('#raster').hidden = true;
+  closeModal($('#raster'));
   if (raster.url) URL.revokeObjectURL(raster.url);
   raster.img = raster.url = null;
 }
@@ -1370,7 +1566,11 @@ function fillRasterForm() {
     if (el.type === 'checkbox') el.checked = !!o[el.dataset.r];
     else if (document.activeElement !== el) el.value = o[el.dataset.r];
   }
-  $$('#raster-mode button').forEach((b) => b.classList.toggle('active', b.dataset.rmode === o.mode));
+  $$('#raster-mode button').forEach((b) => {
+    const active = b.dataset.rmode === o.mode;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
   $('[data-only="threshold"]').hidden = o.mode !== 'threshold';
 }
 // Pixels en niveaux de gris, à la résolution de gravure (scale < 1 : aperçu allégé).
@@ -1464,10 +1664,41 @@ $('#raster-go').onclick = async () => {
   const o = raster.opts;
   if (!(o.width > 0 && o.height > 0 && o.resolution > 0 && o.speed > 0)) return toast('Réglages de gravure invalides', 'err');
   if (o.powerMax <= 0) return toast('Puissance max à 0 : rien ne serait gravé', 'err');
+  const width = Math.max(1, Math.round(o.width * o.resolution));
+  const height = Math.max(1, Math.round(o.height * o.resolution));
+  if (width * height > RASTER_MAX_POINTS) return toast(`Image trop grande à graver (${width} × ${height} points) : réduisez la taille ou la résolution.`, 'err');
+  const button = $('#raster-go');
+  const cancel = $('#raster-cancel');
+  rasterGenerating = true;
+  button.disabled = true;
+  cancel.disabled = true;
+  button.textContent = 'Génération…';
+  let worker;
+  let bitmap;
   let r;
   try {
-    r = rasterGcode(rasterPixels(1), { ...o, firmware: prof().firmware, sMax: sMax() });
-  } catch (e) { return toast(e.message, 'err'); }
+    bitmap = await createImageBitmap(raster.img);
+    r = await new Promise((resolve, reject) => {
+      worker = new Worker(new URL('./raster-worker.js', import.meta.url), { type: 'module' });
+      worker.onmessage = ({ data }) => data.error ? reject(new Error(data.error)) : resolve(data.result);
+      worker.onerror = (event) => {
+        event.preventDefault();
+        reject(new Error('Le traitement en arrière-plan a échoué.'));
+      };
+      worker.postMessage({ bitmap, width, height, options: { ...o, firmware: prof().firmware, sMax: sMax() } }, [bitmap]);
+      bitmap = null;
+    });
+  } catch (e) {
+    toast(e.message, 'err');
+    return;
+  } finally {
+    bitmap?.close();
+    rasterGenerating = false;
+    worker?.terminate();
+    button.disabled = false;
+    cancel.disabled = false;
+    button.textContent = 'Générer et charger';
+  }
   if (!r.rows) return toast('Rien à graver avec ces réglages (image blanche ?)', 'err');
   const name = `${raster.name || 'image'}-gravure.nc`;
   closeRaster();
@@ -1483,7 +1714,9 @@ let scrubbing = false;
 
 function renderPlaybar(st) {
   $('#pb-play').textContent = st.playing ? '⏸' : '▶';
+  $('#pb-play').setAttribute('aria-label', st.playing ? 'Mettre en pause la simulation' : 'Lire la simulation');
   if (!scrubbing) $('#pb-scrub').value = st.total ? Math.round((st.t / st.total) * 1000) : 0;
+  $('#pb-scrub').setAttribute('aria-valuetext', `${fmtClock(st.t)} sur ${fmtClock(st.total)}, ligne ${st.line + 1}`);
   $('#pb-time').textContent = `${fmtClock(st.t)} / ${fmtClock(st.total)}`;
   $('#pb-line').textContent = S.lines.length ? `L${st.line + 1}  ${S.lines[st.line]}` : '';
 }
@@ -1776,8 +2009,9 @@ function renderMacros() {
       <span title="${escapeHtml(m.gcode)}">${escapeHtml(m.name)}</span>
       <button class="primary small" data-macro-run>Lancer</button>
       <button class="ghost small" data-macro-edit>Modifier</button>
-      <button class="ghost small" data-macro-del>✕</button>
+      <button class="ghost small" data-macro-del aria-label="Supprimer la macro ${escapeHtml(m.name)}" title="Supprimer">✕</button>
     </div>`).join('') || '<p class="muted">Aucune macro.</p>';
+  updateEnabled();
 }
 $('#macro-list').onclick = async (e) => {
   const row = e.target.closest('.macro');
@@ -1832,7 +2066,7 @@ function renderSettings() {
   list.innerHTML = keys.map((k) => `
     <div class="setting" data-k="${k}">
       <code>$${k}</code><span>${SETTING_NAMES[k] || 'Réglage'}</span>
-      <input value="${escapeHtml(S.settings[k])}" data-orig="${escapeHtml(S.settings[k])}">
+      <input value="${escapeHtml(S.settings[k])}" data-orig="${escapeHtml(S.settings[k])}" aria-label="$${k} ${SETTING_NAMES[k] || 'Réglage'}">
     </div>`).join('');
   filterSettings();
 }
@@ -1964,6 +2198,7 @@ function escapeHtml(s) {
 
 applyProfile();
 renderMachine();
+setServerControlLock(true);
 connectWs();
 const tourParam = new URLSearchParams(location.search).get('tour');
 if (tourParam !== null) setTimeout(() => runTour(Math.max(0, Number(tourParam) || 0)), 600);

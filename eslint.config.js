@@ -3,6 +3,7 @@ import globals from 'globals';
 // Vérification minimale mais vitale : aucune variable utilisée sans être
 // déclarée (une déclaration effacée par erreur a déjà grisé les boutons de zéro).
 export default [
+  { ignores: ['target/**'] },
   {
     files: ['public/js/**/*.js'],
     languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: globals.browser },

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Licences des dépendances de Copeau</title>
+  <style>body{font-family:sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>
+</head>
+<body>
+  <h1>Licences des dépendances de Copeau Rust</h1>
+  <p>Les liens « source » donnent accès au code source exact de chaque dépendance.</p>
+  <p><a href="/vendor/three/LICENSE">Licence de Three.js</a></p>
+  {{#each licenses}}
+  <section>
+    <h2>{{name}}</h2>
+    <ul>
+      {{#each used_by}}
+      <li>{{crate.name}} {{crate.version}} — <a href="https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download">source</a></li>
+      {{/each}}
+    </ul>
+    <pre>{{text}}</pre>
+  </section>
+  {{/each}}
+</body>
+</html>

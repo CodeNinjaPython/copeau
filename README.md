@@ -13,6 +13,26 @@ Choisissez le type de machine (CNC Grbl, Laser Grbl ou Emblaser 2), le port sér
 
 ## Application Windows portable
 
+### Version Rust
+
+La version Rust conserve l'interface et réécrit le serveur, les protocoles Grbl et Smoothieware, les simulateurs et le palpage. Elle prend aussi en charge la connexion réseau et les profils laser. Pour la construire sous Windows :
+
+```powershell
+npm.cmd ci --omit=dev
+cargo test --locked
+cargo build --release --locked
+```
+
+Le fichier `target\release\copeau-rust.exe` est portable et ne nécessite ni Node.js ni Electron à l'exécution. Il utilise **Microsoft Edge WebView2 Runtime**, normalement présent sur Windows 10 et 11 ; [installez-le](https://developer.microsoft.com/microsoft-edge/webview2/) s'il manque. Placez l'exécutable dans un dossier accessible en écriture : les macros, la configuration et les préférences de l'interface sont enregistrées dans `data` à côté du fichier. Le port local `38427` doit être libre.
+
+Cette version a été vérifiée sur des simulateurs, pas sur une CNC ou un laser réel. Commencez par le simulateur correspondant ; gardez l'arrêt d'urgence à portée de main et vérifiez les mouvements sans outil ni pièce. Pour un laser Grbl, activez `$32=1` avant le repérage ou la gravure. L'arrêt logiciel ne remplace jamais les sécurités matérielles.
+
+Pour lancer uniquement le serveur Rust en développement, utilisez `cargo run --locked -- --server` dans un terminal et arrêtez-le avec `Ctrl+C`. `HOST` doit être une adresse IP et `PORT` est facultatif. L'interface et Three.js sont intégrés à l'exécutable ; Node.js n'est nécessaire que lors de la construction pour récupérer Three.js. Les [licences des dépendances](public/licenses-rust.html), dont celle de Three.js, sont aussi accessibles depuis le manuel intégré.
+
+Après une modification des dépendances Rust, régénérez leurs notices avec `cargo about generate --locked --fail -o public\licenses-rust.html about.hbs` (outil `cargo-about`, fonctionnalité `cli`).
+
+### Version Electron existante
+
 Avec Node.js 20 ou plus récent, depuis Windows :
 
 ```powershell
@@ -71,6 +91,7 @@ npm test
 ```
 
 Les tests utilisent le simulateur intégré (pièce virtuelle de 100 × 100 × 30 mm percée d'un trou Ø25, fraise Ø6) et un simulateur Smoothieware écrit d'après le code source de Smoothieware, pour l'Emblaser 2. Ils ne remplacent pas un essai sur la vraie machine.
+Les tests du portage Rust se lancent avec `cargo test --locked` après `npm ci --omit=dev`.
 
 ## Travailler à plusieurs
 
@@ -94,6 +115,7 @@ Les tests tournent automatiquement sur chaque pull request (GitHub Actions). On 
 - `server/tcp.js` : connexion réseau (telnet)
 - `server/probe.js` : routines de palpage
 - `server/index.js` : serveur HTTP + WebSocket
+- `src/` : version Rust du serveur, des contrôleurs Grbl et Smoothieware, des simulateurs et de la fenêtre Windows
 - `public/js/shared/gcode.js` : interprète G-code partagé (visualiseur, estimation, reprise)
 - `public/js/shared/profiles.js` : types de machine (CNC, laser Grbl, Emblaser 2)
 - `public/js/shared/raster.js` : gravure d'image ligne à ligne

@@ -1,0 +1,31 @@
+name: Rust portable Windows
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci --omit=dev --no-audit --no-fund
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: Préparer l'exécutable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\release\copeau-rust.exe dist\Copeau-Rust-Portable.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Copeau-Rust-Portable
+          path: dist
+          if-no-files-found: error

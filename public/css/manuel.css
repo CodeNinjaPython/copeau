@@ -28,8 +28,8 @@ code { font-family: var(--mono); font-size: 0.88em; background: var(--panel); bo
 pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
 pre code { background: none; border: 0; padding: 0; }
 blockquote {
-  margin: 16px 0; padding: 10px 14px; border-left: 4px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: 0 8px 8px 0;
+  margin: 16px 0; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: 8px;
 }
 blockquote p { margin: 0; }
 table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 15px; display: block; overflow-x: auto; }

@@ -23,6 +23,7 @@ const HOST = process.env.HOST || '127.0.0.1';
 const dataDir = () => path.resolve(process.env.COPEAU_DATA_DIR || path.join(root, 'data'));
 const macrosFile = () => path.join(dataDir(), 'macros.json');
 const configFile = () => path.join(dataDir(), 'config.json');
+const programFile = () => path.join(dataDir(), 'program.json');
 const SIMULATOR = 'simulateur';
 const NETWORK = 'reseau';
 const THREE_DIR = path.join(root, 'node_modules/three');
@@ -40,6 +41,10 @@ marked.use({
       return `<h${depth} id="${slug(text)}">${this.parser.parseInline(tokens)}</h${depth}>\n`;
     },
   },
+});
+app.get('/api/version', async (req, res) => {
+  const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+  res.json({ name: pkg.name, version: pkg.version });
 });
 app.get('/manuel', async (req, res) => {
   const md = await fs.readFile(path.join(root, 'docs/MANUEL.md'), 'utf8');
@@ -331,7 +336,14 @@ const handlers = {
   async getConfig() { return config; },
   async setConfig({ key, value }) { await setConfig(key, value); },
 
-  async load({ name, text }) { grbl.loadJob(String(name || 'programme.nc'), String(text)); },
+  async load({ name, text }) {
+    const program = { name: String(name || 'programme.nc'), text: String(text) };
+    grbl.loadJob(program.name, program.text);
+    try {
+      await fs.mkdir(dataDir(), { recursive: true });
+      await fs.writeFile(programFile(), JSON.stringify(program));
+    } catch (e) { grbl.log('err', `Programme non conservé pour le prochain démarrage : ${e.message}`); }
+  },
   async run({ from = 0, toolChange = true, spinUp = 3, safeZ = 5 }) {
     grbl.runJob(Number(from), { toolChange, spinUpSeconds: Number(spinUp), minSafeZ: Number(safeZ) });
   },
@@ -399,6 +411,11 @@ export async function startServer({ port = PORT, host = HOST, threeAddonsDir, da
   if (threeAddonsDir) process.env.COPEAU_THREE_ADDONS_DIR = threeAddonsDir;
   if (dir) process.env.COPEAU_DATA_DIR = dir;
   await loadConfig();
+  // Le programme chargé avant la fermeture reste chargé, jamais relancé.
+  try {
+    const saved = JSON.parse(await fs.readFile(programFile(), 'utf8'));
+    if (typeof saved.name === 'string' && typeof saved.text === 'string') grbl.loadJob(saved.name, saved.text);
+  } catch { /* aucun programme enregistré */ }
   return new Promise((resolve, reject) => {
     const onError = (error) => {
       server.off('listening', onListening);
